@@ -636,7 +636,7 @@ export function MapPage() {
       };
 
       // Send the POST request to host/api/floydwarshall/matrix/multi-target
-      const response = await gisProcClient.post('/api/floydwarshall/matrix/multi-target', payload);
+      const response = await gisProcClient.post('/api/floydwarshall/matrix/chained-routes', payload);
       setMatrixResult(response.data);
     } catch (err) {
       console.error('Failed to fetch matrix visualization data', err);
