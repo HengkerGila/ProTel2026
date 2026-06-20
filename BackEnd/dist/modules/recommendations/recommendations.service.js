@@ -84,14 +84,17 @@ async function getSubBlockRecommendations(subBlockId) {
         .orderBy(schema_1.irrigationRecommendations.priorityRank)
         .limit(10);
 }
+const schema_2 = require("../../db/schema");
 /** Operator feedback on a recommendation */
 exports.FeedbackSchema = zod_1.z.object({
     feedback_status: zod_1.z.enum(['acknowledged', 'executed', 'skipped', 'deferred']),
     operator_notes: zod_1.z.string().max(1000).optional(),
+    skip_reason: zod_1.z.enum(['pematang_jebol', 'lainnya']).optional(),
+    impacted_sub_block_id: zod_1.z.string().uuid().optional(),
 });
 async function submitFeedback(recId, userId, input) {
     const [rec] = await client_1.db
-        .select({ id: schema_1.irrigationRecommendations.id })
+        .select({ id: schema_1.irrigationRecommendations.id, fieldId: schema_1.irrigationRecommendations.fieldId, subBlockId: schema_1.irrigationRecommendations.subBlockId })
         .from(schema_1.irrigationRecommendations)
         .where((0, drizzle_orm_1.eq)(schema_1.irrigationRecommendations.id, recId))
         .limit(1);
@@ -109,6 +112,38 @@ async function submitFeedback(recId, userId, input) {
     })
         .where((0, drizzle_orm_1.eq)(schema_1.irrigationRecommendations.id, recId))
         .returning();
+    // Handle Doomsday Override: Pematang Jebol
+    if (input.feedback_status === 'skipped' && input.skip_reason === 'pematang_jebol' && rec.subBlockId) {
+        const doomsdayDate = new Date('2099-12-31T23:59:59.000Z');
+        const eventsToInsert = [];
+        // 1. Event untuk kotak saat ini
+        eventsToInsert.push({
+            fieldId: rec.fieldId,
+            subBlockId: rec.subBlockId,
+            eventType: 'snooze_dss',
+            eventDate: new Date().toISOString().split('T')[0],
+            attentionFlagText: 'Pematang Jebol/Bocor',
+            flagActiveHours: 999999, // practically forever
+            flagExpiresAt: doomsdayDate,
+            reportedBy: userId,
+            notes: `Dilaporkan saat skip rekomendasi: ${input.operator_notes || 'Tanpa catatan'}`,
+        });
+        // 2. Event untuk kotak tetangga (jika ada)
+        if (input.impacted_sub_block_id) {
+            eventsToInsert.push({
+                fieldId: rec.fieldId,
+                subBlockId: input.impacted_sub_block_id,
+                eventType: 'snooze_dss',
+                eventDate: new Date().toISOString().split('T')[0],
+                attentionFlagText: 'Pematang Jebol/Bocor',
+                flagActiveHours: 999999,
+                flagExpiresAt: doomsdayDate,
+                reportedBy: userId,
+                notes: `Dilaporkan sebagai imbas jebol dari kotak ${rec.subBlockId}`,
+            });
+        }
+        await client_1.db.insert(schema_2.managementEvents).values(eventsToInsert);
+    }
     return updated;
 }
 // ---------------------------------------------------------------------------

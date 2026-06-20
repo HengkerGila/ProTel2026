@@ -179,5 +179,25 @@ exports.authService = {
         }
         return user;
     },
+    // ── PATCH /auth/me ────────────────────────────────────────────────────────
+    async updateMe(userId, input) {
+        console.log('updateMe input payload is:', input);
+        const updateData = {};
+        if (input.fullName)
+            updateData.fullName = input.fullName;
+        if (input.email)
+            updateData.email = input.email.toLowerCase().trim();
+        if (input.password) {
+            updateData.passwordHash = await bcryptjs_1.default.hash(input.password, 10);
+        }
+        if (Object.keys(updateData).length === 0) {
+            return this.getMe(userId);
+        }
+        await client_1.db
+            .update(mst_1.users)
+            .set(updateData)
+            .where((0, drizzle_orm_1.eq)(mst_1.users.id, userId));
+        return this.getMe(userId);
+    },
 };
 //# sourceMappingURL=auth.service.js.map

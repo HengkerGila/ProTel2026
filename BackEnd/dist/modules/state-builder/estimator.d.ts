@@ -9,6 +9,7 @@ export interface EstimationResult {
     stateSource: 'estimated';
     interpolationConfidence: number;
     usedNeighborCount: number;
+    usedNeighborIds: string[];
 }
 /**
  * Estimasi water level untuk sub-block yang tidak punya data,

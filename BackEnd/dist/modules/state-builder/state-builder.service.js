@@ -51,6 +51,7 @@ async function buildSubBlockState(subBlockId, fieldId) {
             freshnessStatus: freshness,
             lastObservationAt: latest.eventTimestamp,
             interpolationConfidence: null,
+            estimatedFromSubBlockIds: null,
             recordId: latest.id,
         };
     }
@@ -68,6 +69,7 @@ async function buildSubBlockState(subBlockId, fieldId) {
             freshnessStatus: 'no_data',
             lastObservationAt: latest?.eventTimestamp ?? null,
             interpolationConfidence: estimate.interpolationConfidence,
+            estimatedFromSubBlockIds: estimate.usedNeighborIds,
             recordId: null,
         };
     }
@@ -83,6 +85,7 @@ async function buildSubBlockState(subBlockId, fieldId) {
         freshnessStatus: 'no_data',
         lastObservationAt: null,
         interpolationConfidence: null,
+        estimatedFromSubBlockIds: null,
         recordId: null,
     };
 }
@@ -111,6 +114,7 @@ async function buildFieldStates(fieldId) {
                 stateSource: state.stateSource,
                 freshnessStatus: state.freshnessStatus,
                 lastObservationAt: state.lastObservationAt,
+                estimatedFromSubBlockIds: state.estimatedFromSubBlockIds ?? [],
                 interpolationConfidence: state.interpolationConfidence?.toFixed(2),
             });
             // 2. Current State (trx.sub_block_current_states) — Upsert
@@ -122,6 +126,7 @@ async function buildFieldStates(fieldId) {
                 stateSource: state.stateSource,
                 freshnessStatus: state.freshnessStatus,
                 lastObservationAt: state.lastObservationAt,
+                estimatedFromSubBlockIds: state.estimatedFromSubBlockIds ?? [],
                 interpolationConfidence: state.interpolationConfidence?.toFixed(2),
                 updatedAt: now,
             }).onConflictDoUpdate({
@@ -132,6 +137,7 @@ async function buildFieldStates(fieldId) {
                     stateSource: state.stateSource,
                     freshnessStatus: state.freshnessStatus,
                     lastObservationAt: state.lastObservationAt,
+                    estimatedFromSubBlockIds: state.estimatedFromSubBlockIds ?? [],
                     interpolationConfidence: state.interpolationConfidence?.toFixed(2),
                     updatedAt: now,
                 },

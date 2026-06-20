@@ -14,6 +14,7 @@ import {
   irrigationRuleProfiles as ruleProfilesTable,
   irrigationPoints as irrigationPointsTable,
 } from '@/db/schema/mst';
+import { managementEvents as managementEventsTable } from '@/db/schema';
 import { telemetryRecords as telemetryRecordsTable } from '@/db/schema/trx';
 import { AppError } from '@/middleware/error.middleware';
 import { parsePagination, buildPaginationMeta } from '@/shared/utils/pagination.util';
@@ -155,10 +156,25 @@ export const fieldsService = {
         ...(input.area_hectares         !== undefined && { areaHectares: input.area_hectares.toString() }),
         ...(input.operator_count_default !== undefined && { operatorCountDefault: input.operator_count_default }),
         ...(input.decision_cycle_mode   !== undefined && { decisionCycleMode: input.decision_cycle_mode }),
+        ...(input.is_source_depleted    !== undefined && { isSourceDepleted: input.is_source_depleted }),
         ...(input.notes                 !== undefined && { notes: input.notes }),
         ...(input.assigned_file_name    !== undefined && { assignedFileName: input.assigned_file_name }),
         ...(input.irrigation_edges      !== undefined && { irrigationEdges: input.irrigation_edges }),
         ...(input.irrigation_nodes      !== undefined && { irrigationNodes: input.irrigation_nodes }),
+        updatedAt: new Date(),
+      })
+      .where(eq(fieldsTable.id, fieldId))
+      .returning();
+
+    if (!updated) throw new AppError(404, 'FIELD_NOT_FOUND', 'Field tidak ditemukan');
+    return updated;
+  },
+
+  async updateDroughtStatus(fieldId: string, isSourceDepleted: boolean) {
+    const [updated] = await db
+      .update(fieldsTable)
+      .set({
+        isSourceDepleted,
         updatedAt: new Date(),
       })
       .where(eq(fieldsTable.id, fieldId))
@@ -419,6 +435,22 @@ export const subBlocksService = {
     if (updated) {
       await recalculateFieldEmbankments(updated.fieldId);
     }
+  },
+
+  async resolveEmbankmentBreak(subBlockId: string, resolvedBy: string) {
+    // Cari semua event snooze_dss bertipe pematang jebol untuk subBlock ini
+    // yang expiresAt nya masih > now
+    await db.update(managementEventsTable)
+      .set({
+        flagExpiresAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(managementEventsTable.subBlockId, subBlockId),
+        eq(managementEventsTable.eventType, 'snooze_dss'),
+        eq(managementEventsTable.attentionFlagText, 'Pematang Jebol/Bocor'),
+        sql`${managementEventsTable.flagExpiresAt} > NOW()`
+      ));
   },
 };
 

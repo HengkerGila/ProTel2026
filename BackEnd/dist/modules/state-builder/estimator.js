@@ -15,13 +15,25 @@ const schema_1 = require("../../db/schema");
  *   - 0.0 jika tidak ada tetangga dengan data
  */
 async function estimateFromNeighbors(subBlockId) {
-    // 1. Ambil flow_paths yang terhubung ke subBlock ini (sebagai from atau to)
-    const paths = await client_1.db.select({
-        fromId: mst_1.flowPaths.fromSubBlockId,
-        toId: mst_1.flowPaths.toSubBlockId,
-    })
-        .from(mst_1.flowPaths)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(mst_1.flowPaths.isActive, true), (0, drizzle_orm_1.sql) `(${mst_1.flowPaths.fromSubBlockId} = ${subBlockId} OR ${mst_1.flowPaths.toSubBlockId} = ${subBlockId})`));
+    // 1. Dapatkan fieldId dari subBlockId
+    const [sb] = await client_1.db.select({ fieldId: mst_1.subBlocks.fieldId })
+        .from(mst_1.subBlocks).where((0, drizzle_orm_1.eq)(mst_1.subBlocks.id, subBlockId)).limit(1);
+    if (!sb)
+        return null;
+    // 2. Ambil semua sub-blocks di field tersebut, diurutkan agar indeksnya cocok dengan matrix
+    const subBlocks = await client_1.db.select({ id: mst_1.subBlocks.id })
+        .from(mst_1.subBlocks)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(mst_1.subBlocks.fieldId, sb.fieldId), (0, drizzle_orm_1.eq)(mst_1.subBlocks.isActive, true)))
+        .orderBy(mst_1.subBlocks.displayOrder, mst_1.subBlocks.name);
+    // 3. Ambil flow_path matrix untuk field
+    const [flowPath] = await client_1.db.select().from(mst_1.flowPaths)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(mst_1.flowPaths.fieldId, sb.fieldId), (0, drizzle_orm_1.eq)(mst_1.flowPaths.isActive, true)))
+        .limit(1);
+    if (!flowPath || !flowPath.floydWarshallMatrix)
+        return null;
+    // 4. Rekonstruksi direct edges dan filter yang terhubung dengan subBlockId
+    const paths = getDirectEdgesFromMatrix(flowPath.floydWarshallMatrix, subBlocks)
+        .filter(p => p.fromId === subBlockId || p.toId === subBlockId);
     if (paths.length === 0)
         return null;
     // 2. Kumpulkan neighbor IDs (max 1-hop)
@@ -70,6 +82,38 @@ async function estimateFromNeighbors(subBlockId) {
         stateSource: 'estimated',
         interpolationConfidence: Math.round(confidence * 100) / 100,
         usedNeighborCount: usable.length,
+        usedNeighborIds: usable.map(n => n.subBlockId),
     };
+}
+function getDirectEdgesFromMatrix(matrixJson, subBlocks) {
+    if (!matrixJson || typeof matrixJson !== 'object')
+        return [];
+    const successor = Array.isArray(matrixJson.successor)
+        ? matrixJson.successor
+        : Array.isArray(matrixJson.successors)
+            ? matrixJson.successors
+            : null;
+    if (!successor || !Array.isArray(successor))
+        return [];
+    const edges = [];
+    for (let u = 0; u < successor.length; u++) {
+        const row = successor[u];
+        if (!Array.isArray(row))
+            continue;
+        for (let v = 0; v < row.length; v++) {
+            const nextHop = row[v];
+            if (nextHop === v && u !== v) {
+                const fromSb = subBlocks[u];
+                const toSb = subBlocks[v];
+                if (fromSb && toSb) {
+                    edges.push({
+                        fromId: fromSb.id,
+                        toId: toSb.id,
+                    });
+                }
+            }
+        }
+    }
+    return edges;
 }
 //# sourceMappingURL=estimator.js.map

@@ -65,6 +65,7 @@ export async function runWaterRouting(
     subBlockId: recsTable.subBlockId,
     recommendationType: recsTable.recommendationType,
     priorityScore: recsTable.priorityScore,
+    commandText: recsTable.commandText,
   })
     .from(recsTable)
     .where(and(
@@ -94,6 +95,7 @@ export async function runWaterRouting(
   const subBlockRows = await db
     .select({
       id: subBlocksTable.id,
+      code: subBlocksTable.code,
       areaM2: subBlocksTable.areaM2,
       elevationM: subBlocksTable.elevationM,
       centroidEwkt: sql<string>`ST_AsEWKT(${subBlocksTable.centroid})`,

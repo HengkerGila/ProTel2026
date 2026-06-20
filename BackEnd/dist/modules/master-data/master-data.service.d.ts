@@ -1,4 +1,4 @@
-import type { CreateFieldSchema, UpdateFieldSchema, AssignUserFieldSchema, CreateSubBlockSchema, UpdateSubBlockSchema, ImportSubBlocksSchema, CreateDeviceSchema, AssignDeviceSchema, CalibrateDeviceSchema, CreateFlowPathSchema, CreateCropCycleSchema, UpdateCropCyclePhaseSchema, CreateRuleProfileSchema } from './master-data.schema';
+import type { CreateFieldSchema, UpdateFieldSchema, AssignUserFieldSchema, CreateSubBlockSchema, UpdateSubBlockSchema, ImportSubBlocksSchema, CreateDeviceSchema, AssignDeviceSchema, CalibrateDeviceSchema, CreateFlowPathSchema, UpdateFlowPathSchema, CreateCropCycleSchema, UpdateCropCyclePhaseSchema, CreateRuleProfileSchema, CreateIrrigationPointSchema, UpdateIrrigationPointSchema, CreateEmbankmentSchema, UpdateEmbankmentSchema, ImportEmbankmentSchema } from './master-data.schema';
 import type { z } from 'zod';
 type CreateFieldInput = z.infer<typeof CreateFieldSchema>;
 type UpdateFieldInput = z.infer<typeof UpdateFieldSchema>;
@@ -10,9 +10,15 @@ type CreateDeviceInput = z.infer<typeof CreateDeviceSchema>;
 type AssignDeviceInput = z.infer<typeof AssignDeviceSchema>;
 type CalibrateDeviceInput = z.infer<typeof CalibrateDeviceSchema>;
 type CreateFlowPathInput = z.infer<typeof CreateFlowPathSchema>;
+type UpdateFlowPathInput = z.infer<typeof UpdateFlowPathSchema>;
 type CreateCropCycleInput = z.infer<typeof CreateCropCycleSchema>;
 type UpdateCropCyclePhaseInput = z.infer<typeof UpdateCropCyclePhaseSchema>;
 type CreateRuleProfileInput = z.infer<typeof CreateRuleProfileSchema>;
+type CreateIrrigationPointInput = z.infer<typeof CreateIrrigationPointSchema>;
+type UpdateIrrigationPointInput = z.infer<typeof UpdateIrrigationPointSchema>;
+type CreateEmbankmentInput = z.infer<typeof CreateEmbankmentSchema>;
+type UpdateEmbankmentInput = z.infer<typeof UpdateEmbankmentSchema>;
+type ImportEmbankmentInput = z.infer<typeof ImportEmbankmentSchema>;
 export declare const fieldsService: {
     list(userId: string, isAdmin: boolean, query: Record<string, unknown>): Promise<{
         rows: {
@@ -27,9 +33,13 @@ export declare const fieldsService: {
             areaHectares: string | null;
             operatorCountDefault: number;
             decisionCycleMode: string;
+            isSourceDepleted: boolean;
             notes: string | null;
             mapVisualUrl: string | null;
             mapBounds: unknown;
+            assignedFileName: string | null;
+            irrigationEdges: unknown;
+            irrigationNodes: unknown;
         }[];
         meta: import("../../shared/types").PaginationMeta;
     }>;
@@ -45,9 +55,13 @@ export declare const fieldsService: {
         areaHectares: string | null;
         operatorCountDefault: number;
         decisionCycleMode: string;
+        isSourceDepleted: boolean;
         notes: string | null;
         mapVisualUrl: string | null;
         mapBounds: unknown;
+        assignedFileName: string | null;
+        irrigationEdges: unknown;
+        irrigationNodes: unknown;
     }>;
     create(input: CreateFieldInput, createdByUserId: string): Promise<{
         description: string | null;
@@ -61,9 +75,13 @@ export declare const fieldsService: {
         areaHectares: string | null;
         operatorCountDefault: number;
         decisionCycleMode: string;
+        isSourceDepleted: boolean;
         notes: string | null;
         mapVisualUrl: string | null;
         mapBounds: unknown;
+        assignedFileName: string | null;
+        irrigationEdges: unknown;
+        irrigationNodes: unknown;
     }>;
     update(fieldId: string, input: UpdateFieldInput): Promise<{
         id: string;
@@ -74,10 +92,34 @@ export declare const fieldsService: {
         areaHectares: string | null;
         operatorCountDefault: number;
         decisionCycleMode: string;
+        isSourceDepleted: boolean;
         isActive: boolean;
         notes: string | null;
         mapVisualUrl: string | null;
         mapBounds: unknown;
+        assignedFileName: string | null;
+        irrigationEdges: unknown;
+        irrigationNodes: unknown;
+        createdAt: Date;
+        updatedAt: Date;
+    }>;
+    updateDroughtStatus(fieldId: string, isSourceDepleted: boolean): Promise<{
+        id: string;
+        name: string;
+        description: string | null;
+        adm4Code: string;
+        waterSourceType: string;
+        areaHectares: string | null;
+        operatorCountDefault: number;
+        decisionCycleMode: string;
+        isSourceDepleted: boolean;
+        isActive: boolean;
+        notes: string | null;
+        mapVisualUrl: string | null;
+        mapBounds: unknown;
+        assignedFileName: string | null;
+        irrigationEdges: unknown;
+        irrigationNodes: unknown;
         createdAt: Date;
         updatedAt: Date;
     }>;
@@ -87,6 +129,14 @@ export declare const fieldsService: {
 };
 export declare const subBlocksService: {
     listByField(fieldId: string): Promise<{
+        devices: {
+            id: string;
+            deviceCode: string;
+            deviceType: string;
+            notes: string | null;
+        }[];
+        areaM2: number | null;
+        elevationM: number | null;
         code: string | null;
         name: string;
         isActive: boolean;
@@ -95,14 +145,21 @@ export declare const subBlocksService: {
         updatedAt: Date;
         notes: string | null;
         fieldId: string;
+        uniqueCode: string | null;
         polygonGeom: string;
-        areaM2: string | null;
         centroid: string | null;
-        elevationM: string | null;
         soilType: string | null;
         displayOrder: number;
     }[]>;
     getById(subBlockId: string): Promise<{
+        devices: {
+            id: string;
+            deviceCode: string;
+            deviceType: string;
+            notes: string | null;
+        }[];
+        areaM2: number | null;
+        elevationM: number | null;
         code: string | null;
         name: string;
         isActive: boolean;
@@ -111,10 +168,9 @@ export declare const subBlocksService: {
         updatedAt: Date;
         notes: string | null;
         fieldId: string;
+        uniqueCode: string | null;
         polygonGeom: string;
-        areaM2: string | null;
         centroid: string | null;
-        elevationM: string | null;
         soilType: string | null;
         displayOrder: number;
     }>;
@@ -127,6 +183,7 @@ export declare const subBlocksService: {
         updatedAt: Date;
         notes: string | null;
         fieldId: string;
+        uniqueCode: string | null;
         polygonGeom: string;
         areaM2: string | null;
         centroid: string | null;
@@ -139,6 +196,7 @@ export declare const subBlocksService: {
         fieldId: string;
         name: string;
         code: string | null;
+        uniqueCode: string | null;
         polygonGeom: string;
         areaM2: string | null;
         centroid: string | null;
@@ -156,45 +214,77 @@ export declare const subBlocksService: {
         ids: string[];
     }>;
     delete(subBlockId: string): Promise<void>;
+    resolveEmbankmentBreak(subBlockId: string, resolvedBy: string): Promise<void>;
 };
 export declare const devicesService: {
+    listAll(query: Record<string, unknown>): Promise<{
+        rows: {
+            id: string;
+            deviceCode: string;
+            deviceType: string;
+            connectionType: string;
+            hardwareModel: string | null;
+            serialNumber: string | null;
+            firmwareVersion: string | null;
+            fieldId: string;
+            subBlockId: string | null;
+            subBlockName: string | null;
+            status: string;
+            batteryLevelPct: string | null;
+            batteryUpdatedAt: Date | null;
+            installedAt: Date | null;
+            lastSeenAt: Date | null;
+            notes: string | null;
+            topic: string;
+            coordinate: unknown;
+            createdAt: Date;
+            updatedAt: Date;
+        }[];
+        meta: import("../../shared/types").PaginationMeta;
+    }>;
     listByField(fieldId: string): Promise<{
-        status: string;
-        createdAt: Date;
         id: string;
-        updatedAt: Date;
-        notes: string | null;
-        fieldId: string;
         deviceCode: string;
         deviceType: string;
         connectionType: string;
         hardwareModel: string | null;
         serialNumber: string | null;
         firmwareVersion: string | null;
+        fieldId: string;
         subBlockId: string | null;
+        subBlockName: string | null;
+        status: string;
         batteryLevelPct: string | null;
         batteryUpdatedAt: Date | null;
         installedAt: Date | null;
         lastSeenAt: Date | null;
+        notes: string | null;
+        topic: string;
+        coordinate: unknown;
+        createdAt: Date;
+        updatedAt: Date;
     }[]>;
     getById(deviceId: string): Promise<{
-        status: string;
-        createdAt: Date;
         id: string;
-        updatedAt: Date;
-        notes: string | null;
-        fieldId: string;
         deviceCode: string;
         deviceType: string;
         connectionType: string;
         hardwareModel: string | null;
         serialNumber: string | null;
         firmwareVersion: string | null;
+        fieldId: string;
         subBlockId: string | null;
+        subBlockName: string | null;
+        status: string;
         batteryLevelPct: string | null;
         batteryUpdatedAt: Date | null;
         installedAt: Date | null;
         lastSeenAt: Date | null;
+        notes: string | null;
+        topic: string;
+        coordinate: unknown;
+        createdAt: Date;
+        updatedAt: Date;
     }>;
     create(fieldId: string, input: CreateDeviceInput): Promise<{
         status: string;
@@ -214,6 +304,8 @@ export declare const devicesService: {
         batteryUpdatedAt: Date | null;
         installedAt: Date | null;
         lastSeenAt: Date | null;
+        topic: string;
+        coordinate: unknown;
     }>;
     update(deviceId: string, input: Partial<CreateDeviceInput>): Promise<{
         id: string;
@@ -231,6 +323,8 @@ export declare const devicesService: {
         installedAt: Date | null;
         lastSeenAt: Date | null;
         notes: string | null;
+        topic: string;
+        coordinate: unknown;
         createdAt: Date;
         updatedAt: Date;
     }>;
@@ -249,6 +343,7 @@ export declare const devicesService: {
         humidityOffsetPct: string;
         calibrationMethod: string;
         referenceReadingCm: string | null;
+        sensorMaxDistanceMm: number;
         calibratedBy: string | null;
     }>;
     delete(deviceId: string): Promise<void>;
@@ -259,20 +354,77 @@ export declare const flowPathsService: {
         createdAt: Date;
         id: string;
         notes: string | null;
-        fromSubBlockId: string;
-        toSubBlockId: string;
+        fieldId: string;
         flowType: string;
+        floydWarshallMatrix: unknown;
     }[]>;
+    getById(id: string): Promise<{
+        isActive: boolean;
+        createdAt: Date;
+        id: string;
+        notes: string | null;
+        fieldId: string;
+        flowType: string;
+        floydWarshallMatrix: unknown;
+    }>;
     create(fieldId: string, input: CreateFlowPathInput): Promise<{
         isActive: boolean;
         createdAt: Date;
         id: string;
         notes: string | null;
-        fromSubBlockId: string;
-        toSubBlockId: string;
+        fieldId: string;
         flowType: string;
+        floydWarshallMatrix: unknown;
+    }>;
+    update(id: string, input: UpdateFlowPathInput): Promise<{
+        id: string;
+        fieldId: string;
+        flowType: string;
+        floydWarshallMatrix: unknown;
+        isActive: boolean;
+        notes: string | null;
+        createdAt: Date;
     }>;
     delete(flowPathId: string): Promise<void>;
+};
+export declare const irrigationPointsService: {
+    listByField(fieldId: string): Promise<{
+        coordinatePoint: any;
+        elevationM: number | null;
+        name: string | null;
+        id: string;
+        fieldId: string;
+        pointType: string;
+        assignedSubBlocks: string[];
+    }[]>;
+    getById(id: string): Promise<{
+        coordinatePoint: any;
+        elevationM: number | null;
+        name: string | null;
+        id: string;
+        fieldId: string;
+        pointType: string;
+        assignedSubBlocks: string[];
+    }>;
+    create(fieldId: string, input: CreateIrrigationPointInput): Promise<{
+        coordinatePoint: any;
+        elevationM: number | null;
+        name: string | null;
+        id: string;
+        fieldId: string;
+        pointType: string;
+        assignedSubBlocks: string[];
+    }>;
+    update(id: string, input: UpdateIrrigationPointInput): Promise<{
+        coordinatePoint: any;
+        elevationM: number | null;
+        name: string | null;
+        id: string;
+        fieldId: string;
+        pointType: string;
+        assignedSubBlocks: string[];
+    }>;
+    delete(id: string): Promise<void>;
 };
 export declare const cropCyclesService: {
     listBySubBlock(subBlockId: string): Promise<{
@@ -388,6 +540,11 @@ export declare const cropCyclesService: {
 export declare const ruleProfilesService: {
     list(query: Record<string, unknown>): Promise<{
         rows: {
+            awdLowerThresholdCm: number;
+            awdUpperTargetCm: number;
+            droughtAlertCm: number | null;
+            rainDelayMm: number;
+            priorityWeight: number;
             bucketCode: string;
             description: string | null;
             name: string;
@@ -397,19 +554,19 @@ export declare const ruleProfilesService: {
             id: string;
             updatedAt: Date;
             createdBy: string | null;
-            awdLowerThresholdCm: string;
-            awdUpperTargetCm: string;
-            droughtAlertCm: string | null;
             minSaturationDays: number;
             rainfedModifierPct: string;
-            priorityWeight: string;
-            rainDelayMm: string;
             targetConfidence: string;
             isDefault: boolean;
         }[];
         meta: import("../../shared/types").PaginationMeta;
     }>;
     create(input: CreateRuleProfileInput, createdBy: string): Promise<{
+        awdLowerThresholdCm: number;
+        awdUpperTargetCm: number;
+        droughtAlertCm: number | null;
+        rainDelayMm: number;
+        priorityWeight: number;
         bucketCode: string;
         description: string | null;
         name: string;
@@ -419,17 +576,17 @@ export declare const ruleProfilesService: {
         id: string;
         updatedAt: Date;
         createdBy: string | null;
-        awdLowerThresholdCm: string;
-        awdUpperTargetCm: string;
-        droughtAlertCm: string | null;
         minSaturationDays: number;
         rainfedModifierPct: string;
-        priorityWeight: string;
-        rainDelayMm: string;
         targetConfidence: string;
         isDefault: boolean;
     }>;
     getById(id: string): Promise<{
+        awdLowerThresholdCm: number;
+        awdUpperTargetCm: number;
+        droughtAlertCm: number | null;
+        rainDelayMm: number;
+        priorityWeight: number;
         bucketCode: string;
         description: string | null;
         name: string;
@@ -439,35 +596,110 @@ export declare const ruleProfilesService: {
         id: string;
         updatedAt: Date;
         createdBy: string | null;
-        awdLowerThresholdCm: string;
-        awdUpperTargetCm: string;
-        droughtAlertCm: string | null;
         minSaturationDays: number;
         rainfedModifierPct: string;
-        priorityWeight: string;
-        rainDelayMm: string;
         targetConfidence: string;
         isDefault: boolean;
     }>;
     update(id: string, input: Partial<CreateRuleProfileInput>): Promise<{
-        id: string;
-        name: string;
-        description: string | null;
+        awdLowerThresholdCm: number;
+        awdUpperTargetCm: number;
+        droughtAlertCm: number | null;
+        rainDelayMm: number;
+        priorityWeight: number;
         bucketCode: string;
+        description: string | null;
+        name: string;
+        isActive: boolean;
+        createdAt: Date;
         phaseCode: string;
-        awdLowerThresholdCm: string;
-        awdUpperTargetCm: string;
-        droughtAlertCm: string | null;
+        id: string;
+        updatedAt: Date;
+        createdBy: string | null;
         minSaturationDays: number;
         rainfedModifierPct: string;
-        priorityWeight: string;
-        rainDelayMm: string;
         targetConfidence: string;
         isDefault: boolean;
+    }>;
+    delete(id: string): Promise<void>;
+};
+export declare const embankmentsService: {
+    listByField(fieldId: string): Promise<{
+        polygonGeom: unknown;
+        centroid: unknown;
+        areaM2: number | null;
+        elevationM: number | null;
+        code: string | null;
+        name: string;
         isActive: boolean;
-        createdBy: string | null;
         createdAt: Date;
+        id: string;
         updatedAt: Date;
+        notes: string | null;
+        fieldId: string;
+        uniqueCode: string | null;
+        soilType: string | null;
+        displayOrder: number;
+        connectedSubBlocks: string[];
+    }[]>;
+    getById(id: string): Promise<{
+        polygonGeom: unknown;
+        centroid: unknown;
+        areaM2: number | null;
+        elevationM: number | null;
+        code: string | null;
+        name: string;
+        isActive: boolean;
+        createdAt: Date;
+        id: string;
+        updatedAt: Date;
+        notes: string | null;
+        fieldId: string;
+        uniqueCode: string | null;
+        soilType: string | null;
+        displayOrder: number;
+        connectedSubBlocks: string[];
+    }>;
+    create(fieldId: string, input: CreateEmbankmentInput): Promise<{
+        polygonGeom: unknown;
+        centroid: unknown;
+        areaM2: number | null;
+        elevationM: number | null;
+        code: string | null;
+        name: string;
+        isActive: boolean;
+        createdAt: Date;
+        id: string;
+        updatedAt: Date;
+        notes: string | null;
+        fieldId: string;
+        uniqueCode: string | null;
+        soilType: string | null;
+        displayOrder: number;
+        connectedSubBlocks: string[];
+    }>;
+    update(id: string, input: UpdateEmbankmentInput): Promise<{
+        polygonGeom: unknown;
+        centroid: unknown;
+        areaM2: number | null;
+        elevationM: number | null;
+        code: string | null;
+        name: string;
+        isActive: boolean;
+        createdAt: Date;
+        id: string;
+        updatedAt: Date;
+        notes: string | null;
+        fieldId: string;
+        uniqueCode: string | null;
+        soilType: string | null;
+        displayOrder: number;
+        connectedSubBlocks: string[];
+    }>;
+    /** Bulk import from GeoJSON FeatureCollection */
+    importFromGeoJson(fieldId: string, input: ImportEmbankmentInput): Promise<{
+        inserted: number;
+        ids: string[];
     }>;
     delete(id: string): Promise<void>;
 };

@@ -8,12 +8,15 @@ const drizzle_orm_1 = require("drizzle-orm");
 const client_1 = require("../../db/client");
 const mst_1 = require("../../db/schema/mst");
 const schema_1 = require("../../db/schema");
+const config_1 = require("../../config");
 const logger_util_1 = require("../../shared/utils/logger.util");
 const bmkg_types_1 = require("./bmkg.types");
 // ---------------------------------------------------------------------------
 // BMKG API constants
 // ---------------------------------------------------------------------------
-const BMKG_FORECAST_URL = 'https://api.bmkg.go.id/publik/prakiraan/cuaca';
+// URL base dibaca dari env BMKG_BASE_URL (default: https://api.bmkg.go.id/publik/prakiraan-cuaca)
+// adm4_code per-field diambil dari DB: mst.fields.adm4_code (kode kelurahan Kepmendagri 2022)
+const BMKG_FORECAST_URL = config_1.config.BMKG_BASE_URL;
 const FETCH_TIMEOUT_MS = 15_000;
 const USER_AGENT = 'SmartAWD-Backend/1.0 (research/precision-agriculture)';
 // ---------------------------------------------------------------------------
@@ -33,46 +36,78 @@ async function syncFieldForecast(field) {
             throw new Error(`BMKG returned HTTP ${res.status} for adm4=${field.adm4Code}`);
         }
         const json = await res.json();
-        // Parse forecast slots
+        // Parse semua slot dari BMKG (flatten semua hari)
         const dataEntry = json.data?.[0];
         if (!dataEntry) {
             logger_util_1.logger.warn({ adm4Code: field.adm4Code }, 'BMKG: empty data array');
             return;
         }
-        const slots = dataEntry.cuaca.flat(); // flatten day-groups
-        const parsed = slots.map(bmkg_types_1.parseTimeSlot).filter(Boolean);
+        const allSlots = dataEntry.cuaca.flat();
+        const parsed = allSlots.map(bmkg_types_1.parseTimeSlot).filter(Boolean);
         if (parsed.length === 0) {
             logger_util_1.logger.warn({ adm4Code: field.adm4Code }, 'BMKG: no parseable time slots');
             return;
         }
-        // Determine coverage window
-        const validFrom = parsed[0].forecastValidFrom;
-        const validUntil = parsed[parsed.length - 1].forecastValidUntil;
-        // Find next 24-hour precipitation total
+        // ── Filter hanya 12 jam ke depan (= max 4 slot × 3 jam) ────────────────
         const now = new Date();
-        const next24h = parsed.filter((s) => !!s && s.forecastValidFrom >= now && s.forecastValidFrom < new Date(Date.now() + 24 * 3_600_000));
-        const precipNext24h = next24h.reduce((sum, s) => sum + (s.precipitationMm ?? 0), 0);
-        // Get the nearest slot
-        const nearest = (parsed.find((s) => !!s && s.forecastValidFrom >= now) ?? parsed[0]);
-        // INSERT snapshot
+        const horizon = new Date(now.getTime() + 12 * 3_600_000);
+        const slots12h = parsed.filter((s) => !!s && s.forecastValidFrom >= now && s.forecastValidFrom < horizon);
+        // ── Bangun WeatherSlot[] untuk 12 jam ke depan ──────────────────────────
+        const RAIN_THRESHOLD_MM = 2.0;
+        const weatherSlots = slots12h.map(s => ({
+            valid_from: s.forecastValidFrom.toISOString(),
+            valid_until: s.forecastValidUntil.toISOString(),
+            tp_mm: s.precipitationMm ?? 0,
+            weather_desc: s.weatherDesc ?? '',
+            weather_code: s.weatherCode,
+            is_wet: (s.precipitationMm ?? 0) >= RAIN_THRESHOLD_MM,
+        }));
+        // ── Deteksi Rain Events dari slot berurutan yang wet ────────────────────
+        const rainEvents = detectRainEvents(weatherSlots, now);
+        // ── Cari slot kering terdekat setelah kondisi hujan ─────────────────────
+        const firstWetIdx = weatherSlots.findIndex(s => s.is_wet);
+        const nextClearAt = firstWetIdx >= 0
+            ? (weatherSlots.find((s, i) => i > firstWetIdx && !s.is_wet)?.valid_from ?? null)
+            : null;
+        // ── Slot terdekat untuk metadata suhu/kelembaban ─────────────────────────
+        const nearest = (parsed.find(s => !!s && s.forecastValidFrom >= now) ?? parsed[0]);
+        // ── Hitung peak intensity sebagai pengganti precipitation_mm (backward compat) ──
+        const peakIntensityMm = weatherSlots.length > 0
+            ? Math.max(...weatherSlots.map(s => s.tp_mm))
+            : 0;
+        // ── Bangun WeatherAnalysis utuh untuk disimpan ke full_response_json ─────
+        const weatherAnalysis = {
+            fetched_at: now.toISOString(),
+            adm4_code: field.adm4Code,
+            window_hours: 12,
+            slots: weatherSlots,
+            rain_events: rainEvents,
+            next_clear_window_at: nextClearAt,
+        };
+        // ── Tandai snapshot sebelumnya sebagai bukan latest ─────────────────────
         await client_1.db.update(schema_1.weatherForecastSnapshots)
             .set({ isLatest: false })
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.weatherForecastSnapshots.fieldId, field.id), (0, drizzle_orm_1.eq)(schema_1.weatherForecastSnapshots.isLatest, true)));
+        // ── Insert snapshot baru ──────────────────────────────────────────────────
+        const validFrom = parsed[0].forecastValidFrom;
+        const validUntil = parsed[parsed.length - 1].forecastValidUntil;
         await client_1.db.insert(schema_1.weatherForecastSnapshots).values({
             fieldId: field.id,
             adm4Code: field.adm4Code,
             forecastValidFrom: validFrom,
             forecastValidUntil: validUntil,
-            precipitationMm: precipNext24h > 0 ? precipNext24h.toFixed(2) : '0',
+            // peak intensity per 3-jam (bukan sum), untuk backward compat
+            precipitationMm: peakIntensityMm > 0 ? peakIntensityMm.toFixed(2) : '0',
             temperatureC: nearest.temperatureC?.toFixed(2) ?? null,
             humidityPct: nearest.humidityPct?.toFixed(2) ?? null,
             weatherCode: nearest.weatherCode ? Number(nearest.weatherCode) : null,
             weatherDesc: nearest.weatherDesc ?? null,
             bmkgCategory: nearest.bmkgCategory ?? null,
+            fullResponseJson: weatherAnalysis,
             isLatest: true,
-            fetchedAt: new Date(),
+            fetchedAt: now,
         });
-        logger_util_1.logger.info({ fieldName: field.name, adm4Code: field.adm4Code, slots: parsed.length, precipNext24h }, 'BMKG forecast synced');
+        logger_util_1.logger.info({ fieldName: field.name, adm4Code: field.adm4Code, slots: parsed.length, peakIntensityMm }, 'BMKG forecast synced');
         await logIntegration({ action: 'forecast_sync', status: 'success', url: BMKG_FORECAST_URL,
             responseStatus, responseTimeMs: Date.now() - startedAt });
     }
@@ -137,7 +172,44 @@ async function logIntegration(params) {
     }
     catch { /* non-critical */ }
 }
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+// ---------------------------------------------------------------------------
+// Rain Event Detection helpers
+// ---------------------------------------------------------------------------
+/**
+ * Deteksi semua "kejadian hujan" dari array slot.
+ * Slot wet yang berurutan digabung menjadi satu RainEvent.
+ */
+function detectRainEvents(slots, now) {
+    const HEAVY_THRESHOLD_MM = 8.0;
+    const events = [];
+    let i = 0;
+    while (i < slots.length) {
+        if (!slots[i].is_wet) {
+            i++;
+            continue;
+        }
+        // Kumpulkan semua slot wet berurutan sebagai satu event
+        const eventSlots = [slots[i]];
+        while (i + 1 < slots.length && slots[i + 1].is_wet) {
+            i++;
+            eventSlots.push(slots[i]);
+        }
+        const totalMm = eventSlots.reduce((sum, s) => sum + s.tp_mm, 0);
+        const peakMm = Math.max(...eventSlots.map(s => s.tp_mm));
+        const startsAt = new Date(eventSlots[0].valid_from);
+        const endsAt = new Date(eventSlots[eventSlots.length - 1].valid_until);
+        const hoursUntil = Math.max(0, (startsAt.getTime() - now.getTime()) / 3_600_000);
+        events.push({
+            starts_at: eventSlots[0].valid_from,
+            ends_at: eventSlots[eventSlots.length - 1].valid_until,
+            hours_until_rain: Math.round(hoursUntil * 10) / 10,
+            duration_hours: eventSlots.length * 3,
+            total_mm: Math.round(totalMm * 10) / 10,
+            peak_intensity_mm: Math.round(peakMm * 10) / 10,
+            intensity_label: peakMm >= HEAVY_THRESHOLD_MM ? 'heavy' : 'moderate',
+        });
+        i++;
+    }
+    return events;
 }
 //# sourceMappingURL=bmkg.service.js.map

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UpdateRuleProfileSchema = exports.CreateRuleProfileSchema = exports.UpdateCropCyclePhaseSchema = exports.CreateCropCycleSchema = exports.CreateFlowPathSchema = exports.CalibrateDeviceSchema = exports.AssignDeviceSchema = exports.UpdateDeviceSchema = exports.CreateDeviceSchema = exports.ImportSubBlocksSchema = exports.UpdateSubBlockSchema = exports.CreateSubBlockSchema = exports.AssignUserFieldSchema = exports.UpdateFieldSchema = exports.CreateFieldSchema = exports.GeoJsonFeatureCollectionSchema = exports.GeoJsonFeatureSchema = exports.GeoJsonPolygonSchema = void 0;
+exports.ImportEmbankmentSchema = exports.UpdateEmbankmentSchema = exports.CreateEmbankmentSchema = exports.UpdateIrrigationPointSchema = exports.CreateIrrigationPointSchema = exports.GeoJsonPointSchema = exports.UpdateRuleProfileSchema = exports.CreateRuleProfileSchema = exports.UpdateCropCyclePhaseSchema = exports.CreateCropCycleSchema = exports.UpdateFlowPathSchema = exports.CreateFlowPathSchema = exports.CalibrateDeviceSchema = exports.AssignDeviceSchema = exports.UpdateDeviceSchema = exports.CreateDeviceSchema = exports.ImportSubBlocksSchema = exports.UpdateSubBlockSchema = exports.CreateSubBlockSchema = exports.AssignUserFieldSchema = exports.DroughtStatusSchema = exports.UpdateFieldSchema = exports.CreateFieldSchema = exports.GeoJsonFeatureCollectionSchema = exports.GeoJsonFeatureSchema = exports.GeoJsonPolygonSchema = void 0;
 const zod_1 = require("zod");
 // ---------------------------------------------------------------------------
 // GeoJSON Polygon schema (sesuai RFC 7946)
@@ -32,9 +32,16 @@ exports.CreateFieldSchema = zod_1.z.object({
     area_hectares: zod_1.z.coerce.number().positive().optional(),
     operator_count_default: zod_1.z.coerce.number().int().min(1).max(50).default(1),
     decision_cycle_mode: zod_1.z.enum(['normal', 'siaga']).default('normal'),
+    is_source_depleted: zod_1.z.boolean().default(false),
     notes: zod_1.z.string().max(2000).optional(),
+    assigned_file_name: zod_1.z.string().max(500).optional(),
+    irrigation_edges: zod_1.z.array(zod_1.z.any()).optional().nullable(),
+    irrigation_nodes: zod_1.z.array(zod_1.z.any()).optional().nullable(),
 });
 exports.UpdateFieldSchema = exports.CreateFieldSchema.partial();
+exports.DroughtStatusSchema = zod_1.z.object({
+    is_source_depleted: zod_1.z.boolean(),
+});
 exports.AssignUserFieldSchema = zod_1.z.object({
     user_id: zod_1.z.string().uuid('user_id harus berupa UUID'),
     field_role: zod_1.z.enum(['manager', 'operator', 'viewer']).default('operator'),
@@ -68,6 +75,7 @@ exports.CreateDeviceSchema = zod_1.z.object({
     serial_number: zod_1.z.string().max(100).optional(),
     firmware_version: zod_1.z.string().max(50).optional(),
     notes: zod_1.z.string().max(2000).optional(),
+    coordinate: zod_1.z.record(zod_1.z.any()).optional().nullable(),
 });
 exports.UpdateDeviceSchema = exports.CreateDeviceSchema.partial();
 exports.AssignDeviceSchema = zod_1.z.object({
@@ -88,11 +96,11 @@ exports.CalibrateDeviceSchema = zod_1.z.object({
 // Flow path schemas
 // ---------------------------------------------------------------------------
 exports.CreateFlowPathSchema = zod_1.z.object({
-    from_sub_block_id: zod_1.z.string().uuid(),
-    to_sub_block_id: zod_1.z.string().uuid(),
     flow_type: zod_1.z.enum(['natural', 'pipe', 'canal', 'pump']).default('natural'),
+    floyd_warshall_matrix: zod_1.z.unknown().optional(),
     notes: zod_1.z.string().max(500).optional(),
 });
+exports.UpdateFlowPathSchema = exports.CreateFlowPathSchema.partial();
 // ---------------------------------------------------------------------------
 // Crop cycle schemas
 // ---------------------------------------------------------------------------
@@ -132,4 +140,38 @@ exports.CreateRuleProfileSchema = zod_1.z.object({
     is_default: zod_1.z.boolean().default(false),
 });
 exports.UpdateRuleProfileSchema = exports.CreateRuleProfileSchema.partial();
+// ---------------------------------------------------------------------------
+// Irrigation Point schemas
+// ---------------------------------------------------------------------------
+exports.GeoJsonPointSchema = zod_1.z.object({
+    type: zod_1.z.literal('Point'),
+    coordinates: zod_1.z.tuple([zod_1.z.number(), zod_1.z.number()]),
+});
+exports.CreateIrrigationPointSchema = zod_1.z.object({
+    point_type: zod_1.z.string().min(1).max(100),
+    coordinate_point: exports.GeoJsonPointSchema.optional(),
+    elevation_m: zod_1.z.coerce.number().optional(),
+    name: zod_1.z.string().max(200).optional(),
+    assigned_sub_blocks: zod_1.z.array(zod_1.z.string().uuid()).default([]),
+});
+exports.UpdateIrrigationPointSchema = exports.CreateIrrigationPointSchema.partial();
+// ---------------------------------------------------------------------------
+// Embankment schemas
+// ---------------------------------------------------------------------------
+exports.CreateEmbankmentSchema = zod_1.z.object({
+    name: zod_1.z.string().min(1).max(200),
+    code: zod_1.z.string().max(20).optional(),
+    polygon_geom: exports.GeoJsonPolygonSchema,
+    elevation_m: zod_1.z.coerce.number().optional(),
+    soil_type: zod_1.z.string().max(100).optional(),
+    display_order: zod_1.z.coerce.number().int().min(0).default(0),
+    notes: zod_1.z.string().max(2000).optional(),
+    connected_sub_blocks: zod_1.z.array(zod_1.z.string().uuid()).default([]),
+});
+exports.UpdateEmbankmentSchema = exports.CreateEmbankmentSchema.partial();
+exports.ImportEmbankmentSchema = zod_1.z.object({
+    geojson: exports.GeoJsonFeatureCollectionSchema,
+    name_field: zod_1.z.string().default('name'),
+    code_field: zod_1.z.string().optional(),
+});
 //# sourceMappingURL=master-data.schema.js.map

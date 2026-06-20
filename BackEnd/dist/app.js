@@ -19,6 +19,9 @@ const orthomosaic_router_1 = require("./modules/orthomosaic/orthomosaic.router")
 const map_visual_router_1 = require("./modules/map-visual/map-visual.router");
 const archive_router_1 = require("./modules/archive/archive.router");
 const dashboard_router_1 = require("./modules/dashboard/dashboard.router");
+const system_settings_router_1 = require("./modules/system-settings/system-settings.router");
+const query_router_1 = require("./modules/telemetry/query.router");
+const assignments_router_1 = require("./modules/recommendations/assignments.router");
 const config_1 = require("./config");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -66,9 +69,12 @@ app.use(express_1.default.urlencoded({ extended: true }));
 app.use('/health', health_router_1.healthRouter);
 app.use('/auth', auth_router_1.authRouter);
 app.use('/dashboard', dashboard_router_1.dashboardRouter);
+app.use('/system-settings', system_settings_router_1.systemSettingsRouter);
 app.use('/', master_data_router_1.masterDataRouter); // /fields, /sub-blocks, /devices, /crop-cycles, ...
 app.use('/ingest', ingest_router_1.ingestRouter); // POST /ingest/batch
+app.use('/telemetry', query_router_1.telemetryQueryRouter); // GET /telemetry/sub-blocks/:subBlockId/history
 app.use('/', recommendations_router_1.recommendationsRouter); // /fields/:id/recommendations, /alerts, ...
+app.use('/assignments', assignments_router_1.assignmentsRouter); // GET /assignments/pending, /completed | POST /assignments/:id/action
 app.use('/', orthomosaic_router_1.orthomosaicRouter); // /fields/:id/orthomosaic, /map-layers, ...
 app.use('/', map_visual_router_1.mapVisualRouter); // /fields/:id/map-visual, ...
 app.use('/', archive_router_1.archiveRouter); // /crop-cycles/:id/complete, ...

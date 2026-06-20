@@ -10,8 +10,6 @@ export declare function getFieldRecommendations(fieldId: string, query: Record<s
         createdAt: Date;
         id: string;
         fieldId: string;
-        fromSubBlockId: string | null;
-        toSubBlockId: string | null;
         subBlockId: string;
         validUntil: Date;
         ruleProfileId: string | null;
@@ -22,6 +20,8 @@ export declare function getFieldRecommendations(fieldId: string, query: Record<s
         recommendationType: string;
         priorityRank: number;
         priorityScore: string;
+        fromSubBlockId: string | null;
+        toSubBlockId: string | null;
         viaFlowPathId: string | null;
         commandTemplateCode: string;
         commandText: string;
@@ -41,6 +41,8 @@ export declare function getFieldRecommendations(fieldId: string, query: Record<s
         feedbackAt: Date | null;
         hasFeedback: boolean;
         lastFeedbackAt: Date | null;
+        routePathIds: unknown;
+        routingScore: string | null;
     }[];
     meta: import("../../shared/types").PaginationMeta;
     latestJobId: string;
@@ -68,8 +70,6 @@ export declare function getSubBlockRecommendations(subBlockId: string): Promise<
     createdAt: Date;
     id: string;
     fieldId: string;
-    fromSubBlockId: string | null;
-    toSubBlockId: string | null;
     subBlockId: string;
     validUntil: Date;
     ruleProfileId: string | null;
@@ -80,6 +80,8 @@ export declare function getSubBlockRecommendations(subBlockId: string): Promise<
     recommendationType: string;
     priorityRank: number;
     priorityScore: string;
+    fromSubBlockId: string | null;
+    toSubBlockId: string | null;
     viaFlowPathId: string | null;
     commandTemplateCode: string;
     commandText: string;
@@ -99,17 +101,25 @@ export declare function getSubBlockRecommendations(subBlockId: string): Promise<
     feedbackAt: Date | null;
     hasFeedback: boolean;
     lastFeedbackAt: Date | null;
+    routePathIds: unknown;
+    routingScore: string | null;
 }[]>;
 /** Operator feedback on a recommendation */
 export declare const FeedbackSchema: z.ZodObject<{
     feedback_status: z.ZodEnum<["acknowledged", "executed", "skipped", "deferred"]>;
     operator_notes: z.ZodOptional<z.ZodString>;
+    skip_reason: z.ZodOptional<z.ZodEnum<["pematang_jebol", "lainnya"]>>;
+    impacted_sub_block_id: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     feedback_status: "skipped" | "acknowledged" | "executed" | "deferred";
     operator_notes?: string | undefined;
+    skip_reason?: "pematang_jebol" | "lainnya" | undefined;
+    impacted_sub_block_id?: string | undefined;
 }, {
     feedback_status: "skipped" | "acknowledged" | "executed" | "deferred";
     operator_notes?: string | undefined;
+    skip_reason?: "pematang_jebol" | "lainnya" | undefined;
+    impacted_sub_block_id?: string | undefined;
 }>;
 export declare function submitFeedback(recId: string, userId: string, input: z.infer<typeof FeedbackSchema>): Promise<{
     id: string;
@@ -145,6 +155,8 @@ export declare function submitFeedback(recId: string, userId: string, input: z.i
     hasFeedback: boolean;
     lastFeedbackAt: Date | null;
     engineVersion: string | null;
+    routePathIds: unknown;
+    routingScore: string | null;
     createdAt: Date;
 }>;
 export declare function getFieldAlerts(fieldId: string, query: Record<string, unknown>): Promise<{

@@ -36,6 +36,12 @@ exports.masterDataRouter.patch('/fields/:fieldId', auth_middleware_1.requireAuth
     const field = await master_data_service_1.fieldsService.update(req.params['fieldId'], req.body);
     res.json((0, response_util_1.successResponse)(field));
 }));
+// PATCH /fields/:fieldId/drought-status
+const master_data_schema_2 = require("./master-data.schema");
+exports.masterDataRouter.patch('/fields/:fieldId/drought-status', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_2.DroughtStatusSchema), h(async (req, res) => {
+    const field = await master_data_service_1.fieldsService.updateDroughtStatus(req.params['fieldId'], req.body.is_source_depleted);
+    res.json((0, response_util_1.successResponse)(field));
+}));
 // POST /fields/:fieldId/users — assign user ke field
 exports.masterDataRouter.post('/fields/:fieldId/users', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_1.AssignUserFieldSchema), h(async (req, res) => {
     await master_data_service_1.fieldsService.assignUser(req.params['fieldId'], req.body, req.user.id);
@@ -79,6 +85,11 @@ exports.masterDataRouter.get('/sub-blocks/:id', auth_middleware_1.requireAuth, h
     const sb = await master_data_service_1.subBlocksService.getById(req.params['id']);
     res.json((0, response_util_1.successResponse)(sb));
 }));
+// POST /sub-blocks/:id/resolve-embankment
+exports.masterDataRouter.post('/sub-blocks/:id/resolve-embankment', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), h(async (req, res) => {
+    await master_data_service_1.subBlocksService.resolveEmbankmentBreak(req.params['id'], req.user.id);
+    res.json((0, response_util_1.successResponse)({ message: 'Status darurat pematang jebol berhasil dicabut' }));
+}));
 // DELETE /sub-blocks/:id
 exports.masterDataRouter.delete('/sub-blocks/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), h(async (req, res) => {
     await master_data_service_1.subBlocksService.delete(req.params['id']);
@@ -101,6 +112,11 @@ exports.masterDataRouter.post('/fields/:fieldId/devices', auth_middleware_1.requ
 exports.masterDataRouter.patch('/devices/:id', auth_middleware_1.requireAuth, (0, validate_middleware_1.validate)(master_data_schema_1.UpdateDeviceSchema.partial()), h(async (req, res) => {
     const dev = await master_data_service_1.devicesService.update(req.params['id'], req.body);
     res.json((0, response_util_1.successResponse)(dev));
+}));
+// GET /devices — list all devices (system_admin only)
+exports.masterDataRouter.get('/devices', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireSystemRole)('system_admin'), h(async (req, res) => {
+    const { rows, meta } = await master_data_service_1.devicesService.listAll(req.query);
+    res.json((0, response_util_1.successResponse)(rows, meta));
 }));
 // GET /devices/:id
 exports.masterDataRouter.get('/devices/:id', auth_middleware_1.requireAuth, h(async (req, res) => {
@@ -129,22 +145,60 @@ exports.masterDataRouter.post('/devices/:id/calibrate', auth_middleware_1.requir
     res.status(201).json((0, response_util_1.successResponse)(cal));
 }));
 // ===========================================================================
-// FLOW PATHS  —  /fields/:fieldId/flow-paths
+// FLOW PATHS  —  /fields/:fieldId/flow-paths  &  /flow-paths/:id
 // ===========================================================================
 // GET /fields/:fieldId/flow-paths
 exports.masterDataRouter.get('/fields/:fieldId/flow-paths', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('viewer'), h(async (req, res) => {
     const rows = await master_data_service_1.flowPathsService.listByField(req.params['fieldId']);
     res.json((0, response_util_1.successResponse)(rows));
 }));
+// GET /flow-paths/:id
+exports.masterDataRouter.get('/flow-paths/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('viewer'), h(async (req, res) => {
+    const fp = await master_data_service_1.flowPathsService.getById(req.params['id']);
+    res.json((0, response_util_1.successResponse)(fp));
+}));
 // POST /fields/:fieldId/flow-paths
 exports.masterDataRouter.post('/fields/:fieldId/flow-paths', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_1.CreateFlowPathSchema), h(async (req, res) => {
     const fp = await master_data_service_1.flowPathsService.create(req.params['fieldId'], req.body);
     res.status(201).json((0, response_util_1.successResponse)(fp));
 }));
+// PATCH /flow-paths/:id
+exports.masterDataRouter.patch('/flow-paths/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_1.UpdateFlowPathSchema), h(async (req, res) => {
+    const fp = await master_data_service_1.flowPathsService.update(req.params['id'], req.body);
+    res.json((0, response_util_1.successResponse)(fp));
+}));
 // DELETE /flow-paths/:id
-exports.masterDataRouter.delete('/flow-paths/:id', auth_middleware_1.requireAuth, h(async (req, res) => {
+exports.masterDataRouter.delete('/flow-paths/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), h(async (req, res) => {
     await master_data_service_1.flowPathsService.delete(req.params['id']);
     res.json((0, response_util_1.successResponse)({ message: 'Flow path dihapus' }));
+}));
+// ===========================================================================
+// IRRIGATION POINTS  —  /fields/:fieldId/irrigation-points  &  /irrigation-points/:id
+// ===========================================================================
+// GET /fields/:fieldId/irrigation-points
+exports.masterDataRouter.get('/fields/:fieldId/irrigation-points', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('viewer'), h(async (req, res) => {
+    const rows = await master_data_service_1.irrigationPointsService.listByField(req.params['fieldId']);
+    res.json((0, response_util_1.successResponse)(rows));
+}));
+// GET /irrigation-points/:id
+exports.masterDataRouter.get('/irrigation-points/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('viewer'), h(async (req, res) => {
+    const ip = await master_data_service_1.irrigationPointsService.getById(req.params['id']);
+    res.json((0, response_util_1.successResponse)(ip));
+}));
+// POST /fields/:fieldId/irrigation-points
+exports.masterDataRouter.post('/fields/:fieldId/irrigation-points', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_1.CreateIrrigationPointSchema), h(async (req, res) => {
+    const ip = await master_data_service_1.irrigationPointsService.create(req.params['fieldId'], req.body);
+    res.status(201).json((0, response_util_1.successResponse)(ip));
+}));
+// PATCH /irrigation-points/:id
+exports.masterDataRouter.patch('/irrigation-points/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_1.UpdateIrrigationPointSchema), h(async (req, res) => {
+    const ip = await master_data_service_1.irrigationPointsService.update(req.params['id'], req.body);
+    res.json((0, response_util_1.successResponse)(ip));
+}));
+// DELETE /irrigation-points/:id
+exports.masterDataRouter.delete('/irrigation-points/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), h(async (req, res) => {
+    await master_data_service_1.irrigationPointsService.delete(req.params['id']);
+    res.json((0, response_util_1.successResponse)({ message: 'Titik irigasi berhasil dihapus' }));
 }));
 // ===========================================================================
 // CROP CYCLES  —  /sub-blocks/:id/crop-cycles
@@ -207,5 +261,38 @@ exports.masterDataRouter.patch('/rule-profiles/:id', auth_middleware_1.requireAu
 exports.masterDataRouter.delete('/rule-profiles/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireSystemRole)('system_admin'), h(async (req, res) => {
     await master_data_service_1.ruleProfilesService.delete(req.params['id']);
     res.json((0, response_util_1.successResponse)({ message: 'Profil aturan dihapus' }));
+}));
+// ===========================================================================
+// EMBANKMENTS  —  /fields/:fieldId/embankments  &  /embankments/:id
+// ===========================================================================
+// GET /fields/:fieldId/embankments
+exports.masterDataRouter.get('/fields/:fieldId/embankments', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('viewer'), h(async (req, res) => {
+    const rows = await master_data_service_1.embankmentsService.listByField(req.params['fieldId']);
+    res.json((0, response_util_1.successResponse)(rows));
+}));
+// GET /embankments/:id
+exports.masterDataRouter.get('/embankments/:id', auth_middleware_1.requireAuth, h(async (req, res) => {
+    const emb = await master_data_service_1.embankmentsService.getById(req.params['id']);
+    res.json((0, response_util_1.successResponse)(emb));
+}));
+// POST /fields/:fieldId/embankments
+exports.masterDataRouter.post('/fields/:fieldId/embankments', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_1.CreateEmbankmentSchema), h(async (req, res) => {
+    const emb = await master_data_service_1.embankmentsService.create(req.params['fieldId'], req.body);
+    res.status(201).json((0, response_util_1.successResponse)(emb));
+}));
+// POST /fields/:fieldId/embankments/import-geojson
+exports.masterDataRouter.post('/fields/:fieldId/embankments/import-geojson', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_1.ImportEmbankmentSchema), h(async (req, res) => {
+    const result = await master_data_service_1.embankmentsService.importFromGeoJson(req.params['fieldId'], req.body);
+    res.status(201).json((0, response_util_1.successResponse)(result));
+}));
+// PATCH /embankments/:id
+exports.masterDataRouter.patch('/embankments/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), (0, validate_middleware_1.validate)(master_data_schema_1.UpdateEmbankmentSchema), h(async (req, res) => {
+    const emb = await master_data_service_1.embankmentsService.update(req.params['id'], req.body);
+    res.json((0, response_util_1.successResponse)(emb));
+}));
+// DELETE /embankments/:id
+exports.masterDataRouter.delete('/embankments/:id', auth_middleware_1.requireAuth, (0, rbac_middleware_1.requireFieldAccess)('manager'), h(async (req, res) => {
+    await master_data_service_1.embankmentsService.delete(req.params['id']);
+    res.json((0, response_util_1.successResponse)({ message: 'Pematang berhasil dihapus' }));
 }));
 //# sourceMappingURL=master-data.router.js.map

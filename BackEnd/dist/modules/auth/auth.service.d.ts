@@ -15,5 +15,14 @@ export declare const authService: {
         lastLoginAt: Date | null;
         createdAt: Date;
     }>;
+    updateMe(userId: string, input: any): Promise<{
+        id: string;
+        email: string;
+        fullName: string;
+        systemRole: string;
+        isActive: boolean;
+        lastLoginAt: Date | null;
+        createdAt: Date;
+    }>;
 };
 //# sourceMappingURL=auth.service.d.ts.map

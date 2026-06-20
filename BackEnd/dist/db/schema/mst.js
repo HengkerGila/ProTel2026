@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.mapLayers = exports.cropCycles = exports.irrigationRuleProfiles = exports.alertConfigs = exports.sensorCalibrations = exports.deviceAssignments = exports.devices = exports.flowPaths = exports.subBlocks = exports.userFields = exports.fields = exports.users = exports.growthPhases = exports.riceDurationBuckets = exports.mst = void 0;
+exports.systemSettings = exports.mapLayers = exports.cropCycles = exports.irrigationRuleProfiles = exports.alertConfigs = exports.sensorCalibrations = exports.deviceAssignments = exports.devices = exports.irrigationPoints = exports.flowPaths = exports.embankments = exports.subBlocks = exports.userFields = exports.fields = exports.users = exports.growthPhases = exports.riceDurationBuckets = exports.mst = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 const geometry_1 = require("../geometry");
 exports.mst = (0, pg_core_1.pgSchema)('mst');
@@ -55,10 +55,14 @@ exports.fields = exports.mst.table('fields', {
     areaHectares: (0, pg_core_1.numeric)('area_hectares', { precision: 8, scale: 4 }),
     operatorCountDefault: (0, pg_core_1.integer)('operator_count_default').notNull().default(1),
     decisionCycleMode: (0, pg_core_1.text)('decision_cycle_mode').notNull().default('normal'),
+    isSourceDepleted: (0, pg_core_1.boolean)('is_source_depleted').notNull().default(false),
     isActive: (0, pg_core_1.boolean)('is_active').notNull().default(true),
     notes: (0, pg_core_1.text)('notes'),
     mapVisualUrl: (0, pg_core_1.text)('map_visual_url'),
     mapBounds: (0, pg_core_1.jsonb)('map_bounds'),
+    assignedFileName: (0, pg_core_1.text)('assigned_file_name'),
+    irrigationEdges: (0, pg_core_1.json)('irrigation_edges'),
+    irrigationNodes: (0, pg_core_1.json)('irrigation_nodes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -81,6 +85,9 @@ exports.subBlocks = exports.mst.table('sub_blocks', {
     fieldId: (0, pg_core_1.uuid)('field_id').notNull().references(() => exports.fields.id, { onDelete: 'restrict' }),
     name: (0, pg_core_1.text)('name').notNull(),
     code: (0, pg_core_1.text)('code'),
+    // unique_code is GENERATED ALWAYS AS (COALESCE(code, 'nocode') || '_' || id) STORED in PostgreSQL.
+    // Drizzle does not model generated columns natively; treat as read-only text.
+    uniqueCode: (0, pg_core_1.text)('unique_code'),
     polygonGeom: (0, geometry_1.geometryPolygon)('polygon_geom').notNull(),
     // Generated columns (read-only — PostgreSQL generates these dari polygonGeom)
     areaM2: (0, pg_core_1.numeric)('area_m2', { precision: 12, scale: 2 }),
@@ -94,16 +101,52 @@ exports.subBlocks = exports.mst.table('sub_blocks', {
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 // ---------------------------------------------------------------------------
+// mst.embankments  ← PEMATANG SAWAH (sub-block border / galengan)
+// ---------------------------------------------------------------------------
+exports.embankments = exports.mst.table('embankments', {
+    id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),
+    fieldId: (0, pg_core_1.uuid)('field_id').notNull().references(() => exports.fields.id, { onDelete: 'restrict' }),
+    name: (0, pg_core_1.text)('name').notNull(),
+    // code is NOT unique — multiple embankments may share the same code across fields
+    code: (0, pg_core_1.text)('code'),
+    // unique_code is GENERATED ALWAYS AS (COALESCE(code, 'nocode') || '_' || id) STORED.
+    // Drizzle does not model generated columns natively; treat as read-only text.
+    uniqueCode: (0, pg_core_1.text)('unique_code'),
+    polygonGeom: (0, geometry_1.geometryPolygon)('polygon_geom').notNull(),
+    areaM2: (0, pg_core_1.numeric)('area_m2', { precision: 12, scale: 2 }),
+    centroid: (0, geometry_1.geometryPoint)('centroid'),
+    elevationM: (0, pg_core_1.numeric)('elevation_m', { precision: 7, scale: 2 }),
+    soilType: (0, pg_core_1.text)('soil_type'),
+    displayOrder: (0, pg_core_1.integer)('display_order').notNull().default(0),
+    isActive: (0, pg_core_1.boolean)('is_active').notNull().default(true),
+    notes: (0, pg_core_1.text)('notes'),
+    connectedSubBlocks: (0, pg_core_1.jsonb)('connected_sub_blocks').$type().notNull().default([]),
+    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+// ---------------------------------------------------------------------------
 // mst.flow_paths
 // ---------------------------------------------------------------------------
 exports.flowPaths = exports.mst.table('flow_paths', {
     id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),
-    fromSubBlockId: (0, pg_core_1.uuid)('from_sub_block_id').notNull().references(() => exports.subBlocks.id, { onDelete: 'restrict' }),
-    toSubBlockId: (0, pg_core_1.uuid)('to_sub_block_id').notNull().references(() => exports.subBlocks.id, { onDelete: 'restrict' }),
+    fieldId: (0, pg_core_1.uuid)('field_id').notNull().references(() => exports.fields.id, { onDelete: 'restrict' }),
     flowType: (0, pg_core_1.text)('flow_type').notNull().default('natural'),
+    floydWarshallMatrix: (0, pg_core_1.json)('floyd_warshall_matrix'),
     isActive: (0, pg_core_1.boolean)('is_active').notNull().default(true),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+// ---------------------------------------------------------------------------
+// mst.irrigation_points
+// ---------------------------------------------------------------------------
+exports.irrigationPoints = exports.mst.table('irrigation_points', {
+    id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),
+    fieldId: (0, pg_core_1.uuid)('field_id').notNull().references(() => exports.fields.id, { onDelete: 'restrict' }),
+    pointType: (0, pg_core_1.text)('point_type').notNull(),
+    coordinatePoint: (0, geometry_1.geometryPoint)('coordinate_point'),
+    elevationM: (0, pg_core_1.numeric)('elevation_m', { precision: 7, scale: 2 }),
+    name: (0, pg_core_1.text)('name'),
+    assignedSubBlocks: (0, pg_core_1.jsonb)('assigned_sub_blocks').$type().notNull().default([]),
 });
 // ---------------------------------------------------------------------------
 // mst.devices
@@ -124,6 +167,8 @@ exports.devices = exports.mst.table('devices', {
     installedAt: (0, pg_core_1.timestamp)('installed_at', { withTimezone: true }),
     lastSeenAt: (0, pg_core_1.timestamp)('last_seen_at', { withTimezone: true }),
     notes: (0, pg_core_1.text)('notes'),
+    topic: (0, pg_core_1.text)('topic').notNull().default(''),
+    coordinate: (0, pg_core_1.json)('coordinate'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -155,6 +200,8 @@ exports.sensorCalibrations = exports.mst.table('sensor_calibrations', {
     humidityOffsetPct: (0, pg_core_1.numeric)('humidity_offset_pct', { precision: 4, scale: 2 }).notNull().default('0.00'),
     calibrationMethod: (0, pg_core_1.text)('calibration_method').notNull().default('field_measurement'),
     referenceReadingCm: (0, pg_core_1.numeric)('reference_reading_cm', { precision: 7, scale: 2 }),
+    // Jarak maksimum sensor ultrasonik (mm). Rumus: water_level_cm = (sensorMaxDistanceMm - d) / 10
+    sensorMaxDistanceMm: (0, pg_core_1.integer)('sensor_max_distance_mm').notNull().default(1400),
     calibratedBy: (0, pg_core_1.uuid)('calibrated_by').references(() => exports.users.id),
     notes: (0, pg_core_1.text)('notes'),
     isActive: (0, pg_core_1.boolean)('is_active').notNull().default(true),
@@ -241,6 +288,18 @@ exports.mapLayers = exports.mst.table('map_layers', {
     processingError: (0, pg_core_1.text)('processing_error'),
     uploadedBy: (0, pg_core_1.uuid)('uploaded_by').references(() => exports.users.id),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+// ---------------------------------------------------------------------------
+// mst.system_settings
+// ---------------------------------------------------------------------------
+exports.systemSettings = exports.mst.table('system_settings', {
+    id: (0, pg_core_1.text)('id').primaryKey().default('global'),
+    organizationName: (0, pg_core_1.text)('organization_name').notNull().default('Smart AWD Farm'),
+    organizationLogo: (0, pg_core_1.text)('organization_logo'),
+    measurementUnits: (0, pg_core_1.text)('measurement_units').notNull().default('metric'),
+    cloudflareApiUrl: (0, pg_core_1.text)('cloudflare_api_url'),
+    cloudflareApiKey: (0, pg_core_1.text)('cloudflare_api_key'),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 //# sourceMappingURL=mst.js.map

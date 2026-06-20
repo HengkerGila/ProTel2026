@@ -32,7 +32,64 @@ function requireFieldAccess(minRole = 'viewer') {
                 next();
                 return;
             }
-            const fieldId = req.params['fieldId'] ?? req.params['id'];
+            let fieldId = req.params['fieldId'] ?? req.body?.field_id ?? req.body?.fieldId;
+            if (!fieldId) {
+                const id = req.params['id'];
+                if (id) {
+                    const url = req.originalUrl;
+                    if (url.includes('/sub-blocks/')) {
+                        const [sb] = await client_1.db
+                            .select({ fieldId: mst_1.subBlocks.fieldId })
+                            .from(mst_1.subBlocks)
+                            .where((0, drizzle_orm_1.eq)(mst_1.subBlocks.id, id))
+                            .limit(1);
+                        if (!sb) {
+                            next(new error_middleware_1.AppError(404, 'SUB_BLOCK_NOT_FOUND', 'Petak tidak ditemukan'));
+                            return;
+                        }
+                        fieldId = sb.fieldId;
+                    }
+                    else if (url.includes('/devices/')) {
+                        const [dev] = await client_1.db
+                            .select({ fieldId: mst_1.devices.fieldId })
+                            .from(mst_1.devices)
+                            .where((0, drizzle_orm_1.eq)(mst_1.devices.id, id))
+                            .limit(1);
+                        if (!dev) {
+                            next(new error_middleware_1.AppError(404, 'DEVICE_NOT_FOUND', 'Perangkat tidak ditemukan'));
+                            return;
+                        }
+                        fieldId = dev.fieldId;
+                    }
+                    else if (url.includes('/flow-paths/')) {
+                        const [fp] = await client_1.db
+                            .select({ fieldId: mst_1.flowPaths.fieldId })
+                            .from(mst_1.flowPaths)
+                            .where((0, drizzle_orm_1.eq)(mst_1.flowPaths.id, id))
+                            .limit(1);
+                        if (!fp) {
+                            next(new error_middleware_1.AppError(404, 'FLOW_PATH_NOT_FOUND', 'Flow path tidak ditemukan'));
+                            return;
+                        }
+                        fieldId = fp.fieldId;
+                    }
+                    else if (url.includes('/irrigation-points/')) {
+                        const [ip] = await client_1.db
+                            .select({ fieldId: mst_1.irrigationPoints.fieldId })
+                            .from(mst_1.irrigationPoints)
+                            .where((0, drizzle_orm_1.eq)(mst_1.irrigationPoints.id, id))
+                            .limit(1);
+                        if (!ip) {
+                            next(new error_middleware_1.AppError(404, 'IRRIGATION_POINT_NOT_FOUND', 'Titik irigasi tidak ditemukan'));
+                            return;
+                        }
+                        fieldId = ip.fieldId;
+                    }
+                    else {
+                        fieldId = id;
+                    }
+                }
+            }
             if (!fieldId) {
                 next(new error_middleware_1.AppError(400, 'FIELD_ID_REQUIRED', 'Field ID tidak ditemukan di request'));
                 return;

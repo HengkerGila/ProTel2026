@@ -35,6 +35,12 @@ const envSchema = zod_1.z.object({
     R2_SECRET_ACCESS_KEY: zod_1.z.string().optional(),
     R2_BUCKET_NAME: zod_1.z.string().default('awd-orthomosaic'),
     R2_PUBLIC_URL: zod_1.z.preprocess((val) => val === '' ? undefined : val, zod_1.z.string().url().optional()),
+    // GISPROC
+    GISPROC_API_BASE_URI: zod_1.z.preprocess((val) => val === '' ? undefined : val, zod_1.z.string().url().default('http://localhost:8001')),
+    // MQTT
+    MQTT_URL: zod_1.z.string().url().default('mqtt://localhost:1883'),
+    // BMKG
+    BMKG_BASE_URL: zod_1.z.string().url().default('https://api.bmkg.go.id/publik/prakiraan-cuaca'),
 });
 const _parsed = envSchema.safeParse(process.env);
 if (!_parsed.success) {

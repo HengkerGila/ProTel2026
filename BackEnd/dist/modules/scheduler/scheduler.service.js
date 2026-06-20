@@ -11,6 +11,7 @@ const bmkg_sync_job_1 = require("./jobs/bmkg-sync.job");
 const decision_cycle_job_1 = require("./jobs/decision-cycle.job");
 const hst_updater_job_1 = require("./jobs/hst-updater.job");
 const stale_flag_job_1 = require("./jobs/stale-flag.job");
+const state_builder_job_1 = require("./jobs/state-builder.job");
 // ---------------------------------------------------------------------------
 // Guard: prevent concurrent overlapping runs per job
 // ---------------------------------------------------------------------------
@@ -45,12 +46,15 @@ function startScheduler() {
     node_cron_1.default.schedule('*/30 * * * *', guarded('decision_cycle', decision_cycle_job_1.runDecisionCycleJob));
     // ── HST updater — daily midnight ───────────────────────────────────────
     node_cron_1.default.schedule('0 0 * * *', guarded('hst_updater', hst_updater_job_1.runHstUpdaterJob));
+    // ── State builder — every 10 min ──────────────────────────────────────
+    node_cron_1.default.schedule('*/10 * * * *', guarded('state_builder', state_builder_job_1.runStateBuilderJob));
     logger_util_1.logger.info({
+        state_builder: '*/10 * * * *',
         stale_flag: '*/15 * * * *',
         bmkg_sync: '0 */3 * * *',
         decision_cycle: '*/30 * * * *',
         hst_updater: '0 0 * * *',
-    }, '✓ Scheduler started — 4 jobs registered');
+    }, '✓ Scheduler started — 5 jobs registered');
 }
 function stopScheduler() {
     node_cron_1.default.getTasks().forEach(task => task.stop());

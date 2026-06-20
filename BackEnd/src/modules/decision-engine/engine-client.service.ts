@@ -2,6 +2,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { db } from '@/db/client';
 import {
+  fields as fieldsTable,
   subBlocks as subBlocksTable,
   cropCycles as cropCyclesTable,
   irrigationRuleProfiles as ruleProfilesTable,
@@ -69,7 +70,7 @@ interface EvaluateRequest {
   job_id: string;
   field_id: string;
   cycle_mode: string;
-  field_context: { water_source_type: string; operator_count: number };
+  field_context: { water_source_type: string; operator_count: number; is_source_depleted: boolean };
   sub_blocks: SubBlockInputPayload[];
   weather: {
     rain_events: any[]; // RainEvent[] dari full_response_json
@@ -129,7 +130,19 @@ export async function runDecisionCycleForField(
     // 2. Refresh state for all sub-blocks (fresh data before evaluation)
     await buildFieldStates(fieldId);
 
-    // 3. Load all active sub-blocks with full context
+    // 3a. Load field context
+    const [field] = await db.select({
+      waterSourceType: fieldsTable.waterSourceType,
+      operatorCountDefault: fieldsTable.operatorCountDefault,
+      isSourceDepleted: fieldsTable.isSourceDepleted,
+    })
+    .from(fieldsTable)
+    .where(eq(fieldsTable.id, fieldId))
+    .limit(1);
+
+    if (!field) throw new Error(`Field ${fieldId} not found`);
+
+    // 3b. Load all active sub-blocks with full context
     const subBlocks = await db
       .select({
         id: subBlocksTable.id,
@@ -249,7 +262,7 @@ export async function runDecisionCycleForField(
       job_id: jobId,
       field_id: fieldId,
       cycle_mode: cycleMode,
-      field_context: { water_source_type: 'irrigated', operator_count: 1 },
+      field_context: { water_source_type: field.waterSourceType, operator_count: field.operatorCountDefault, is_source_depleted: field.isSourceDepleted },
       sub_blocks: subBlocksPayload,
       weather: {
         rain_events: (forecast?.fullResponseJson as any)?.rain_events ?? [],

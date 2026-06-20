@@ -99,16 +99,24 @@ export declare const CreateFieldSchema: z.ZodObject<{
     area_hectares: z.ZodOptional<z.ZodNumber>;
     operator_count_default: z.ZodDefault<z.ZodNumber>;
     decision_cycle_mode: z.ZodDefault<z.ZodEnum<["normal", "siaga"]>>;
+    is_source_depleted: z.ZodDefault<z.ZodBoolean>;
     notes: z.ZodOptional<z.ZodString>;
+    assigned_file_name: z.ZodOptional<z.ZodString>;
+    irrigation_edges: z.ZodNullable<z.ZodOptional<z.ZodArray<z.ZodAny, "many">>>;
+    irrigation_nodes: z.ZodNullable<z.ZodOptional<z.ZodArray<z.ZodAny, "many">>>;
 }, "strip", z.ZodTypeAny, {
     name: string;
     adm4_code: string;
     water_source_type: "irrigated" | "rainfed" | "lowland";
     operator_count_default: number;
     decision_cycle_mode: "normal" | "siaga";
+    is_source_depleted: boolean;
     description?: string | undefined;
     area_hectares?: number | undefined;
     notes?: string | undefined;
+    assigned_file_name?: string | undefined;
+    irrigation_edges?: any[] | null | undefined;
+    irrigation_nodes?: any[] | null | undefined;
 }, {
     name: string;
     adm4_code: string;
@@ -117,7 +125,11 @@ export declare const CreateFieldSchema: z.ZodObject<{
     area_hectares?: number | undefined;
     operator_count_default?: number | undefined;
     decision_cycle_mode?: "normal" | "siaga" | undefined;
+    is_source_depleted?: boolean | undefined;
     notes?: string | undefined;
+    assigned_file_name?: string | undefined;
+    irrigation_edges?: any[] | null | undefined;
+    irrigation_nodes?: any[] | null | undefined;
 }>;
 export declare const UpdateFieldSchema: z.ZodObject<{
     name: z.ZodOptional<z.ZodString>;
@@ -127,7 +139,11 @@ export declare const UpdateFieldSchema: z.ZodObject<{
     area_hectares: z.ZodOptional<z.ZodOptional<z.ZodNumber>>;
     operator_count_default: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
     decision_cycle_mode: z.ZodOptional<z.ZodDefault<z.ZodEnum<["normal", "siaga"]>>>;
+    is_source_depleted: z.ZodOptional<z.ZodDefault<z.ZodBoolean>>;
     notes: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    assigned_file_name: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    irrigation_edges: z.ZodOptional<z.ZodNullable<z.ZodOptional<z.ZodArray<z.ZodAny, "many">>>>;
+    irrigation_nodes: z.ZodOptional<z.ZodNullable<z.ZodOptional<z.ZodArray<z.ZodAny, "many">>>>;
 }, "strip", z.ZodTypeAny, {
     description?: string | undefined;
     name?: string | undefined;
@@ -136,7 +152,11 @@ export declare const UpdateFieldSchema: z.ZodObject<{
     area_hectares?: number | undefined;
     operator_count_default?: number | undefined;
     decision_cycle_mode?: "normal" | "siaga" | undefined;
+    is_source_depleted?: boolean | undefined;
     notes?: string | undefined;
+    assigned_file_name?: string | undefined;
+    irrigation_edges?: any[] | null | undefined;
+    irrigation_nodes?: any[] | null | undefined;
 }, {
     description?: string | undefined;
     name?: string | undefined;
@@ -145,7 +165,18 @@ export declare const UpdateFieldSchema: z.ZodObject<{
     area_hectares?: number | undefined;
     operator_count_default?: number | undefined;
     decision_cycle_mode?: "normal" | "siaga" | undefined;
+    is_source_depleted?: boolean | undefined;
     notes?: string | undefined;
+    assigned_file_name?: string | undefined;
+    irrigation_edges?: any[] | null | undefined;
+    irrigation_nodes?: any[] | null | undefined;
+}>;
+export declare const DroughtStatusSchema: z.ZodObject<{
+    is_source_depleted: z.ZodBoolean;
+}, "strip", z.ZodTypeAny, {
+    is_source_depleted: boolean;
+}, {
+    is_source_depleted: boolean;
 }>;
 export declare const AssignUserFieldSchema: z.ZodObject<{
     user_id: z.ZodString;
@@ -328,6 +359,7 @@ export declare const CreateDeviceSchema: z.ZodObject<{
     serial_number: z.ZodOptional<z.ZodString>;
     firmware_version: z.ZodOptional<z.ZodString>;
     notes: z.ZodOptional<z.ZodString>;
+    coordinate: z.ZodNullable<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>>;
 }, "strip", z.ZodTypeAny, {
     device_code: string;
     device_type: "awd_water_level" | "weather_station" | "multi_sensor";
@@ -336,6 +368,7 @@ export declare const CreateDeviceSchema: z.ZodObject<{
     hardware_model?: string | undefined;
     serial_number?: string | undefined;
     firmware_version?: string | undefined;
+    coordinate?: Record<string, any> | null | undefined;
 }, {
     device_code: string;
     notes?: string | undefined;
@@ -344,6 +377,7 @@ export declare const CreateDeviceSchema: z.ZodObject<{
     hardware_model?: string | undefined;
     serial_number?: string | undefined;
     firmware_version?: string | undefined;
+    coordinate?: Record<string, any> | null | undefined;
 }>;
 export declare const UpdateDeviceSchema: z.ZodObject<{
     device_code: z.ZodOptional<z.ZodString>;
@@ -353,6 +387,7 @@ export declare const UpdateDeviceSchema: z.ZodObject<{
     serial_number: z.ZodOptional<z.ZodOptional<z.ZodString>>;
     firmware_version: z.ZodOptional<z.ZodOptional<z.ZodString>>;
     notes: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    coordinate: z.ZodOptional<z.ZodNullable<z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>>>;
 }, "strip", z.ZodTypeAny, {
     notes?: string | undefined;
     device_code?: string | undefined;
@@ -361,6 +396,7 @@ export declare const UpdateDeviceSchema: z.ZodObject<{
     hardware_model?: string | undefined;
     serial_number?: string | undefined;
     firmware_version?: string | undefined;
+    coordinate?: Record<string, any> | null | undefined;
 }, {
     notes?: string | undefined;
     device_code?: string | undefined;
@@ -369,6 +405,7 @@ export declare const UpdateDeviceSchema: z.ZodObject<{
     hardware_model?: string | undefined;
     serial_number?: string | undefined;
     firmware_version?: string | undefined;
+    coordinate?: Record<string, any> | null | undefined;
 }>;
 export declare const AssignDeviceSchema: z.ZodObject<{
     sub_block_id: z.ZodString;
@@ -409,20 +446,30 @@ export declare const CalibrateDeviceSchema: z.ZodObject<{
     reference_reading_cm?: number | undefined;
 }>;
 export declare const CreateFlowPathSchema: z.ZodObject<{
-    from_sub_block_id: z.ZodString;
-    to_sub_block_id: z.ZodString;
     flow_type: z.ZodDefault<z.ZodEnum<["natural", "pipe", "canal", "pump"]>>;
+    floyd_warshall_matrix: z.ZodOptional<z.ZodUnknown>;
     notes: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    from_sub_block_id: string;
-    to_sub_block_id: string;
     flow_type: "natural" | "pipe" | "canal" | "pump";
     notes?: string | undefined;
+    floyd_warshall_matrix?: unknown;
 }, {
-    from_sub_block_id: string;
-    to_sub_block_id: string;
     notes?: string | undefined;
     flow_type?: "natural" | "pipe" | "canal" | "pump" | undefined;
+    floyd_warshall_matrix?: unknown;
+}>;
+export declare const UpdateFlowPathSchema: z.ZodObject<{
+    flow_type: z.ZodOptional<z.ZodDefault<z.ZodEnum<["natural", "pipe", "canal", "pump"]>>>;
+    floyd_warshall_matrix: z.ZodOptional<z.ZodOptional<z.ZodUnknown>>;
+    notes: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+}, "strip", z.ZodTypeAny, {
+    notes?: string | undefined;
+    flow_type?: "natural" | "pipe" | "canal" | "pump" | undefined;
+    floyd_warshall_matrix?: unknown;
+}, {
+    notes?: string | undefined;
+    flow_type?: "natural" | "pipe" | "canal" | "pump" | undefined;
+    floyd_warshall_matrix?: unknown;
 }>;
 export declare const CreateCropCycleSchema: z.ZodObject<{
     bucket_code: z.ZodEnum<["early", "medium_early", "medium", "medium_late", "late"]>;
@@ -544,5 +591,253 @@ export declare const UpdateRuleProfileSchema: z.ZodObject<{
     rain_delay_mm?: number | undefined;
     target_confidence?: "high" | "medium" | "low" | undefined;
     is_default?: boolean | undefined;
+}>;
+export declare const GeoJsonPointSchema: z.ZodObject<{
+    type: z.ZodLiteral<"Point">;
+    coordinates: z.ZodTuple<[z.ZodNumber, z.ZodNumber], null>;
+}, "strip", z.ZodTypeAny, {
+    type: "Point";
+    coordinates: [number, number];
+}, {
+    type: "Point";
+    coordinates: [number, number];
+}>;
+export type GeoJsonPoint = z.infer<typeof GeoJsonPointSchema>;
+export declare const CreateIrrigationPointSchema: z.ZodObject<{
+    point_type: z.ZodString;
+    coordinate_point: z.ZodOptional<z.ZodObject<{
+        type: z.ZodLiteral<"Point">;
+        coordinates: z.ZodTuple<[z.ZodNumber, z.ZodNumber], null>;
+    }, "strip", z.ZodTypeAny, {
+        type: "Point";
+        coordinates: [number, number];
+    }, {
+        type: "Point";
+        coordinates: [number, number];
+    }>>;
+    elevation_m: z.ZodOptional<z.ZodNumber>;
+    name: z.ZodOptional<z.ZodString>;
+    assigned_sub_blocks: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+}, "strip", z.ZodTypeAny, {
+    point_type: string;
+    assigned_sub_blocks: string[];
+    name?: string | undefined;
+    elevation_m?: number | undefined;
+    coordinate_point?: {
+        type: "Point";
+        coordinates: [number, number];
+    } | undefined;
+}, {
+    point_type: string;
+    name?: string | undefined;
+    elevation_m?: number | undefined;
+    coordinate_point?: {
+        type: "Point";
+        coordinates: [number, number];
+    } | undefined;
+    assigned_sub_blocks?: string[] | undefined;
+}>;
+export declare const UpdateIrrigationPointSchema: z.ZodObject<{
+    point_type: z.ZodOptional<z.ZodString>;
+    coordinate_point: z.ZodOptional<z.ZodOptional<z.ZodObject<{
+        type: z.ZodLiteral<"Point">;
+        coordinates: z.ZodTuple<[z.ZodNumber, z.ZodNumber], null>;
+    }, "strip", z.ZodTypeAny, {
+        type: "Point";
+        coordinates: [number, number];
+    }, {
+        type: "Point";
+        coordinates: [number, number];
+    }>>>;
+    elevation_m: z.ZodOptional<z.ZodOptional<z.ZodNumber>>;
+    name: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    assigned_sub_blocks: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString, "many">>>;
+}, "strip", z.ZodTypeAny, {
+    name?: string | undefined;
+    elevation_m?: number | undefined;
+    point_type?: string | undefined;
+    coordinate_point?: {
+        type: "Point";
+        coordinates: [number, number];
+    } | undefined;
+    assigned_sub_blocks?: string[] | undefined;
+}, {
+    name?: string | undefined;
+    elevation_m?: number | undefined;
+    point_type?: string | undefined;
+    coordinate_point?: {
+        type: "Point";
+        coordinates: [number, number];
+    } | undefined;
+    assigned_sub_blocks?: string[] | undefined;
+}>;
+export declare const CreateEmbankmentSchema: z.ZodObject<{
+    name: z.ZodString;
+    code: z.ZodOptional<z.ZodString>;
+    polygon_geom: z.ZodObject<{
+        type: z.ZodLiteral<"Polygon">;
+        coordinates: z.ZodArray<z.ZodArray<z.ZodTuple<[z.ZodNumber, z.ZodNumber], null>, "many">, "many">;
+    }, "strip", z.ZodTypeAny, {
+        type: "Polygon";
+        coordinates: [number, number][][];
+    }, {
+        type: "Polygon";
+        coordinates: [number, number][][];
+    }>;
+    elevation_m: z.ZodOptional<z.ZodNumber>;
+    soil_type: z.ZodOptional<z.ZodString>;
+    display_order: z.ZodDefault<z.ZodNumber>;
+    notes: z.ZodOptional<z.ZodString>;
+    connected_sub_blocks: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+}, "strip", z.ZodTypeAny, {
+    name: string;
+    polygon_geom: {
+        type: "Polygon";
+        coordinates: [number, number][][];
+    };
+    display_order: number;
+    connected_sub_blocks: string[];
+    code?: string | undefined;
+    notes?: string | undefined;
+    elevation_m?: number | undefined;
+    soil_type?: string | undefined;
+}, {
+    name: string;
+    polygon_geom: {
+        type: "Polygon";
+        coordinates: [number, number][][];
+    };
+    code?: string | undefined;
+    notes?: string | undefined;
+    elevation_m?: number | undefined;
+    soil_type?: string | undefined;
+    display_order?: number | undefined;
+    connected_sub_blocks?: string[] | undefined;
+}>;
+export declare const UpdateEmbankmentSchema: z.ZodObject<{
+    name: z.ZodOptional<z.ZodString>;
+    code: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    polygon_geom: z.ZodOptional<z.ZodObject<{
+        type: z.ZodLiteral<"Polygon">;
+        coordinates: z.ZodArray<z.ZodArray<z.ZodTuple<[z.ZodNumber, z.ZodNumber], null>, "many">, "many">;
+    }, "strip", z.ZodTypeAny, {
+        type: "Polygon";
+        coordinates: [number, number][][];
+    }, {
+        type: "Polygon";
+        coordinates: [number, number][][];
+    }>>;
+    elevation_m: z.ZodOptional<z.ZodOptional<z.ZodNumber>>;
+    soil_type: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    display_order: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
+    notes: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    connected_sub_blocks: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString, "many">>>;
+}, "strip", z.ZodTypeAny, {
+    code?: string | undefined;
+    name?: string | undefined;
+    notes?: string | undefined;
+    polygon_geom?: {
+        type: "Polygon";
+        coordinates: [number, number][][];
+    } | undefined;
+    elevation_m?: number | undefined;
+    soil_type?: string | undefined;
+    display_order?: number | undefined;
+    connected_sub_blocks?: string[] | undefined;
+}, {
+    code?: string | undefined;
+    name?: string | undefined;
+    notes?: string | undefined;
+    polygon_geom?: {
+        type: "Polygon";
+        coordinates: [number, number][][];
+    } | undefined;
+    elevation_m?: number | undefined;
+    soil_type?: string | undefined;
+    display_order?: number | undefined;
+    connected_sub_blocks?: string[] | undefined;
+}>;
+export declare const ImportEmbankmentSchema: z.ZodObject<{
+    geojson: z.ZodObject<{
+        type: z.ZodLiteral<"FeatureCollection">;
+        features: z.ZodArray<z.ZodObject<{
+            type: z.ZodLiteral<"Feature">;
+            geometry: z.ZodObject<{
+                type: z.ZodLiteral<"Polygon">;
+                coordinates: z.ZodArray<z.ZodArray<z.ZodTuple<[z.ZodNumber, z.ZodNumber], null>, "many">, "many">;
+            }, "strip", z.ZodTypeAny, {
+                type: "Polygon";
+                coordinates: [number, number][][];
+            }, {
+                type: "Polygon";
+                coordinates: [number, number][][];
+            }>;
+            properties: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        }, "strip", z.ZodTypeAny, {
+            type: "Feature";
+            geometry: {
+                type: "Polygon";
+                coordinates: [number, number][][];
+            };
+            properties?: Record<string, unknown> | undefined;
+        }, {
+            type: "Feature";
+            geometry: {
+                type: "Polygon";
+                coordinates: [number, number][][];
+            };
+            properties?: Record<string, unknown> | undefined;
+        }>, "many">;
+    }, "strip", z.ZodTypeAny, {
+        type: "FeatureCollection";
+        features: {
+            type: "Feature";
+            geometry: {
+                type: "Polygon";
+                coordinates: [number, number][][];
+            };
+            properties?: Record<string, unknown> | undefined;
+        }[];
+    }, {
+        type: "FeatureCollection";
+        features: {
+            type: "Feature";
+            geometry: {
+                type: "Polygon";
+                coordinates: [number, number][][];
+            };
+            properties?: Record<string, unknown> | undefined;
+        }[];
+    }>;
+    name_field: z.ZodDefault<z.ZodString>;
+    code_field: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    geojson: {
+        type: "FeatureCollection";
+        features: {
+            type: "Feature";
+            geometry: {
+                type: "Polygon";
+                coordinates: [number, number][][];
+            };
+            properties?: Record<string, unknown> | undefined;
+        }[];
+    };
+    name_field: string;
+    code_field?: string | undefined;
+}, {
+    geojson: {
+        type: "FeatureCollection";
+        features: {
+            type: "Feature";
+            geometry: {
+                type: "Polygon";
+                coordinates: [number, number][][];
+            };
+            properties?: Record<string, unknown> | undefined;
+        }[];
+    };
+    name_field?: string | undefined;
+    code_field?: string | undefined;
 }>;
 //# sourceMappingURL=master-data.schema.d.ts.map

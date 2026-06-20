@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.orthomosaicPublishHistory = exports.orthomosaicUploads = exports.recommendationFeedback = exports.irrigationRecommendations = exports.telemetryAlerts = exports.managementEvents = exports.weatherWarningSnapshots = exports.weatherForecastSnapshots = exports.subBlockCurrentStates = exports.subBlockStates = exports.telemetryRecords = exports.rawEvents = exports.telemetryBatches = exports.integrationConfigs = exports.engineConfigs = exports.archiveJobs = exports.schedulerState = exports.jobAttempts = exports.decisionJobs = exports.refreshTokens = exports.trx = exports.sys = void 0;
+exports.dssTasks = exports.orthomosaicPublishHistory = exports.orthomosaicUploads = exports.recommendationFeedback = exports.irrigationRecommendations = exports.telemetryAlerts = exports.managementEvents = exports.weatherWarningSnapshots = exports.weatherForecastSnapshots = exports.subBlockCurrentStates = exports.subBlockStates = exports.telemetryRecords = exports.rawEvents = exports.telemetryBatches = exports.integrationConfigs = exports.engineConfigs = exports.archiveJobs = exports.schedulerState = exports.jobAttempts = exports.decisionJobs = exports.refreshTokens = exports.trx = exports.sys = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 const mst_1 = require("./mst");
 exports.sys = (0, pg_core_1.pgSchema)('sys');
@@ -188,6 +188,8 @@ exports.subBlockStates = exports.trx.table('sub_block_states', {
     freshnessStatus: (0, pg_core_1.text)('freshness_status').notNull().default('no_data'),
     lastObservationAt: (0, pg_core_1.timestamp)('last_observation_at', { withTimezone: true }),
     sourceDeviceId: (0, pg_core_1.uuid)('source_device_id').references(() => mst_1.devices.id, { onDelete: 'set null' }),
+    // Array UUID dari sub-block tetangga yang dipakai untuk estimasi (audit trail DSS)
+    estimatedFromSubBlockIds: (0, pg_core_1.uuid)('estimated_from_sub_block_ids').array(),
     interpolationConfidence: (0, pg_core_1.numeric)('interpolation_confidence', { precision: 3, scale: 2 }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -205,6 +207,8 @@ exports.subBlockCurrentStates = exports.trx.table('sub_block_current_states', {
     freshnessStatus: (0, pg_core_1.text)('freshness_status').notNull().default('no_data'),
     lastObservationAt: (0, pg_core_1.timestamp)('last_observation_at', { withTimezone: true }),
     sourceDeviceId: (0, pg_core_1.uuid)('source_device_id').references(() => mst_1.devices.id, { onDelete: 'set null' }),
+    // Array UUID dari sub-block tetangga yang dipakai untuk estimasi (audit trail DSS)
+    estimatedFromSubBlockIds: (0, pg_core_1.uuid)('estimated_from_sub_block_ids').array(),
     interpolationConfidence: (0, pg_core_1.numeric)('interpolation_confidence', { precision: 3, scale: 2 }),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -332,6 +336,9 @@ exports.irrigationRecommendations = exports.trx.table('irrigation_recommendation
     hasFeedback: (0, pg_core_1.boolean)('has_feedback').notNull().default(false),
     lastFeedbackAt: (0, pg_core_1.timestamp)('last_feedback_at', { withTimezone: true }),
     engineVersion: (0, pg_core_1.text)('engine_version'),
+    // Floyd-Warshall routing enrichment
+    routePathIds: (0, pg_core_1.jsonb)('route_path_ids'), // UUID[] sub_block berurutan source→target
+    routingScore: (0, pg_core_1.numeric)('routing_score', { precision: 10, scale: 4 }), // total bobot rute
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 // ---------------------------------------------------------------------------
@@ -381,5 +388,22 @@ exports.orthomosaicPublishHistory = exports.trx.table('orthomosaic_publish_histo
     unpublishedBy: (0, pg_core_1.uuid)('unpublished_by').references(() => mst_1.users.id),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+// ---------------------------------------------------------------------------
+// trx.dss_tasks
+// ---------------------------------------------------------------------------
+exports.dssTasks = exports.trx.table('dss_tasks', {
+    id: (0, pg_core_1.uuid)('id').primaryKey().defaultRandom(),
+    fieldId: (0, pg_core_1.uuid)('field_id').notNull().references(() => mst_1.fields.id, { onDelete: 'restrict' }),
+    subBlockId: (0, pg_core_1.uuid)('sub_block_id').references(() => mst_1.subBlocks.id, { onDelete: 'set null' }),
+    taskType: (0, pg_core_1.text)('task_type').notNull(),
+    commandText: (0, pg_core_1.text)('command_text').notNull(),
+    reason: (0, pg_core_1.text)('reason'),
+    priorityScore: (0, pg_core_1.numeric)('priority_score', { precision: 3, scale: 2 }), // 0.00 to 1.00
+    status: (0, pg_core_1.text)('status').notNull().default('PENDING'),
+    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: (0, pg_core_1.timestamp)('completed_at', { withTimezone: true }),
+    completedBy: (0, pg_core_1.uuid)('completed_by').references(() => mst_1.users.id, { onDelete: 'set null' }),
 });
 //# sourceMappingURL=trx.js.map

@@ -12,6 +12,9 @@ export declare const config: {
     DECISION_ENGINE_URL: string;
     DECISION_ENGINE_TIMEOUT_MS: number;
     R2_BUCKET_NAME: string;
+    GISPROC_API_BASE_URI: string;
+    MQTT_URL: string;
+    BMKG_BASE_URL: string;
     R2_ENDPOINT?: string | undefined;
     R2_ACCESS_KEY_ID?: string | undefined;
     R2_SECRET_ACCESS_KEY?: string | undefined;

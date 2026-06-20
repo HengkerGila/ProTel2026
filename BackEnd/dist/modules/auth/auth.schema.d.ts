@@ -32,7 +32,21 @@ export declare const TokenResponseSchema: z.ZodObject<{
     token_type: "Bearer";
     expires_in: number;
 }>;
+export declare const UpdateProfileSchema: z.ZodObject<{
+    fullName: z.ZodOptional<z.ZodString>;
+    email: z.ZodOptional<z.ZodString>;
+    password: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    email?: string | undefined;
+    fullName?: string | undefined;
+    password?: string | undefined;
+}, {
+    email?: string | undefined;
+    fullName?: string | undefined;
+    password?: string | undefined;
+}>;
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type RefreshInput = z.infer<typeof RefreshSchema>;
 export type TokenResponse = z.infer<typeof TokenResponseSchema>;
+export type UpdateProfileInput = z.infer<typeof UpdateProfileSchema>;
 //# sourceMappingURL=auth.schema.d.ts.map

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TokenResponseSchema = exports.RefreshSchema = exports.LoginSchema = void 0;
+exports.UpdateProfileSchema = exports.TokenResponseSchema = exports.RefreshSchema = exports.LoginSchema = void 0;
 const zod_1 = require("zod");
 // ---------------------------------------------------------------------------
 // Request body schemas
@@ -20,5 +20,10 @@ exports.TokenResponseSchema = zod_1.z.object({
     refresh_token: zod_1.z.string(),
     token_type: zod_1.z.literal('Bearer'),
     expires_in: zod_1.z.number(), // seconds
+});
+exports.UpdateProfileSchema = zod_1.z.object({
+    fullName: zod_1.z.string().min(1, 'Nama lengkap wajib diisi').optional(),
+    email: zod_1.z.string().email('Format email tidak valid').optional(),
+    password: zod_1.z.string().min(6, 'Password minimal 6 karakter').optional(),
 });
 //# sourceMappingURL=auth.schema.js.map

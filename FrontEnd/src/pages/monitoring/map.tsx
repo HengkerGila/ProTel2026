@@ -1440,17 +1440,39 @@ export function MapPage() {
         {selectedSubBlock && (
           <div className="absolute top-0 right-0 h-full w-96 bg-background/95 backdrop-blur-md border-l shadow-2xl z-30 animate-in slide-in-from-right duration-300 flex flex-col">
             {/* Drawer Header */}
-            <div className="flex items-center justify-between p-4 border-b">
-              <div>
-                <h3 className="font-bold text-lg text-foreground">{selectedSubBlock.name}</h3>
-                <p className="text-xs text-muted-foreground">Insight historis data telemetri</p>
+            <div className="flex flex-col p-4 border-b gap-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-lg text-foreground">{selectedSubBlock.name}</h3>
+                  <p className="text-xs text-muted-foreground">Insight historis data telemetri</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedSubBlock(null)}
+                  className="p-1.5 hover:bg-muted rounded-full text-muted-foreground transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
-              <button 
-                onClick={() => setSelectedSubBlock(null)}
-                className="p-1.5 hover:bg-muted rounded-full text-muted-foreground transition-colors"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex gap-2">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="w-full text-xs"
+                  onClick={async () => {
+                    if (confirm('Laporkan pematang untuk kotak ini telah diperbaiki?')) {
+                      try {
+                        await apiClient.post(`/sub-blocks/${selectedSubBlock.id}/resolve-embankment`);
+                        alert('Status darurat dicabut');
+                      } catch (e) {
+                        alert('Gagal mencabut status darurat');
+                      }
+                    }
+                  }}
+                >
+                  <CheckCircle2 className="h-4 w-4 mr-1 text-green-500" />
+                  Pematang Diperbaiki
+                </Button>
+              </div>
             </div>
 
             {/* Drawer Content */}

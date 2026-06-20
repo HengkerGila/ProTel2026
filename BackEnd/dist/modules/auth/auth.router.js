@@ -67,4 +67,19 @@ exports.authRouter.get('/me', auth_middleware_1.requireAuth, async (req, res, ne
         next(err);
     }
 });
+// ---------------------------------------------------------------------------
+// PATCH /auth/me
+// Header: Authorization: Bearer <access_token>
+// Body: { fullName, email, password }
+// Response: updated user profile
+// ---------------------------------------------------------------------------
+exports.authRouter.patch('/me', auth_middleware_1.requireAuth, (0, validate_middleware_1.validate)(auth_schema_1.UpdateProfileSchema), async (req, res, next) => {
+    try {
+        const user = await auth_service_1.authService.updateMe(req.user.id, req.body);
+        res.json((0, response_util_1.successResponse)(user));
+    }
+    catch (err) {
+        next(err);
+    }
+});
 //# sourceMappingURL=auth.router.js.map

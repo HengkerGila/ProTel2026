@@ -8,6 +8,7 @@ const mst_1 = require("../../db/schema/mst");
 const schema_1 = require("../../db/schema");
 const bmkg_service_1 = require("../../modules/weather/bmkg.service");
 const state_builder_service_1 = require("../../modules/state-builder/state-builder.service");
+const routing_service_1 = require("./routing.service");
 const config_1 = require("../../config");
 const logger_util_1 = require("../../shared/utils/logger.util");
 // ---------------------------------------------------------------------------
@@ -27,7 +28,18 @@ async function runDecisionCycleForField(fieldId, cycleMode) {
         logger_util_1.logger.info({ jobId, fieldId, cycleMode }, 'Decision cycle starting');
         // 2. Refresh state for all sub-blocks (fresh data before evaluation)
         await (0, state_builder_service_1.buildFieldStates)(fieldId);
-        // 3. Load all active sub-blocks with full context
+        // 3a. Load field context
+        const [field] = await client_1.db.select({
+            waterSourceType: mst_1.fields.waterSourceType,
+            operatorCountDefault: mst_1.fields.operatorCountDefault,
+            isSourceDepleted: mst_1.fields.isSourceDepleted,
+        })
+            .from(mst_1.fields)
+            .where((0, drizzle_orm_1.eq)(mst_1.fields.id, fieldId))
+            .limit(1);
+        if (!field)
+            throw new Error(`Field ${fieldId} not found`);
+        // 3b. Load all active sub-blocks with full context
         const subBlocks = await client_1.db
             .select({
             id: mst_1.subBlocks.id,
@@ -35,7 +47,8 @@ async function runDecisionCycleForField(fieldId, cycleMode) {
             waterSourceType: (0, drizzle_orm_1.sql) `'irrigated'`, // from field, simplified
         })
             .from(mst_1.subBlocks)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(mst_1.subBlocks.fieldId, fieldId), (0, drizzle_orm_1.eq)(mst_1.subBlocks.isActive, true)));
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(mst_1.subBlocks.fieldId, fieldId), (0, drizzle_orm_1.eq)(mst_1.subBlocks.isActive, true)))
+            .orderBy(mst_1.subBlocks.displayOrder, mst_1.subBlocks.name);
         if (subBlocks.length === 0) {
             await client_1.db.update(schema_1.decisionJobs).set({ status: 'skipped', completedAt: new Date() }).where((0, drizzle_orm_1.eq)(schema_1.decisionJobs.id, jobId));
             return;
@@ -67,9 +80,13 @@ async function runDecisionCycleForField(fieldId, cycleMode) {
             arr.push(f);
             flagMap.set(f.subBlockId, arr);
         });
-        // 8. Load flow paths for field
-        const allFlowPaths = await client_1.db.select().from(mst_1.flowPaths)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.sql) `${mst_1.flowPaths.fromSubBlockId} IN (SELECT id FROM mst.sub_blocks WHERE field_id = ${fieldId})`, (0, drizzle_orm_1.eq)(mst_1.flowPaths.isActive, true)));
+        // 8. Load flow paths / matrix for field
+        const [flowPath] = await client_1.db.select().from(mst_1.flowPaths)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(mst_1.flowPaths.fieldId, fieldId), (0, drizzle_orm_1.eq)(mst_1.flowPaths.isActive, true)))
+            .limit(1);
+        const allFlowPaths = flowPath && flowPath.floydWarshallMatrix
+            ? getDirectEdgesFromMatrix(flowPath.floydWarshallMatrix, subBlocks, flowPath.flowType)
+            : [];
         // 9. Load weather + warnings
         const forecast = await (0, bmkg_service_1.getLatestForecast)(fieldId);
         const warnings = await (0, bmkg_service_1.getActiveWarnings)(fieldId);
@@ -123,10 +140,11 @@ async function runDecisionCycleForField(fieldId, cycleMode) {
             job_id: jobId,
             field_id: fieldId,
             cycle_mode: cycleMode,
-            field_context: { water_source_type: 'irrigated', operator_count: 1 },
+            field_context: { water_source_type: field.waterSourceType, operator_count: field.operatorCountDefault, is_source_depleted: field.isSourceDepleted },
             sub_blocks: subBlocksPayload,
             weather: {
-                precipitation_mm: forecast?.precipitationMm ? parseFloat(forecast.precipitationMm) : null,
+                rain_events: forecast?.fullResponseJson?.rain_events ?? [],
+                peak_intensity_mm: forecast?.precipitationMm ? parseFloat(forecast.precipitationMm) : null,
                 bmkg_category: forecast?.bmkgCategory ?? null,
                 temperature_c: forecast?.temperatureC ? parseFloat(forecast.temperatureC) : null,
                 humidity_pct: forecast?.humidityPct ? parseFloat(forecast.humidityPct) : null,
@@ -182,6 +200,10 @@ async function runDecisionCycleForField(fieldId, cycleMode) {
             recommendationsGenerated: result.recommendations.length,
         }).where((0, drizzle_orm_1.eq)(schema_1.decisionJobs.id, jobId));
         logger_util_1.logger.info({ jobId, fieldId, recs: result.recommendations.length, engineVersion: result.engine_version }, 'Decision cycle complete');
+        // 14. Trigger water routing asynchronously (ideal case)
+        setImmediate(() => {
+            (0, routing_service_1.runWaterRouting)(fieldId, jobId, result.recommendations).catch(err => logger_util_1.logger.error({ err, jobId, fieldId }, 'Water routing failed — non-blocking'));
+        });
     }
     catch (err) {
         await client_1.db.update(schema_1.decisionJobs).set({
@@ -192,5 +214,37 @@ async function runDecisionCycleForField(fieldId, cycleMode) {
         logger_util_1.logger.error({ err, jobId, fieldId }, 'Decision cycle failed');
         throw err;
     }
+}
+function getDirectEdgesFromMatrix(matrixJson, subBlocks, flowType) {
+    if (!matrixJson || typeof matrixJson !== 'object')
+        return [];
+    const successor = Array.isArray(matrixJson.successor)
+        ? matrixJson.successor
+        : Array.isArray(matrixJson.successors)
+            ? matrixJson.successors
+            : null;
+    if (!successor || !Array.isArray(successor))
+        return [];
+    const edges = [];
+    for (let u = 0; u < successor.length; u++) {
+        const row = successor[u];
+        if (!Array.isArray(row))
+            continue;
+        for (let v = 0; v < row.length; v++) {
+            const nextHop = row[v];
+            if (nextHop === v && u !== v) {
+                const fromSb = subBlocks[u];
+                const toSb = subBlocks[v];
+                if (fromSb && toSb) {
+                    edges.push({
+                        fromSubBlockId: fromSb.id,
+                        toSubBlockId: toSb.id,
+                        flowType: flowType,
+                    });
+                }
+            }
+        }
+    }
+    return edges;
 }
 //# sourceMappingURL=engine-client.service.js.map

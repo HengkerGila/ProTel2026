@@ -5,6 +5,7 @@ const config_1 = require("./config");
 const client_1 = require("./db/client");
 const logger_util_1 = require("./shared/utils/logger.util");
 const scheduler_service_1 = require("./modules/scheduler/scheduler.service");
+const mqtt_service_1 = require("./modules/telemetry/mqtt.service");
 async function bootstrap() {
     logger_util_1.logger.info(`Starting Smart AWD Server 1 [${config_1.config.NODE_ENV}]...`);
     // 1. Verify database connection before accepting traffic
@@ -15,6 +16,7 @@ async function bootstrap() {
         // 3. Start cron scheduler (after server is up, non-blocking)
         if (config_1.config.NODE_ENV !== 'test') {
             (0, scheduler_service_1.startScheduler)();
+            (0, mqtt_service_1.startMqttListener)();
         }
     });
     // ---------------------------------------------------------------------------
