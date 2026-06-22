@@ -9,6 +9,7 @@ import { authRouter }             from '@/modules/auth/auth.router';
 import { masterDataRouter }       from '@/modules/master-data/master-data.router';
 import { ingestRouter }           from '@/modules/telemetry/ingest.router';
 import { recommendationsRouter }  from '@/modules/recommendations/recommendations.router';
+import { agronomicTreatmentsRouter } from '@/modules/agronomic-treatments/agronomic-treatments.router';
 import { orthomosaicRouter }      from '@/modules/orthomosaic/orthomosaic.router';
 import { mapVisualRouter }        from '@/modules/map-visual/map-visual.router';
 import { archiveRouter }          from '@/modules/archive/archive.router';
@@ -78,6 +79,7 @@ app.use('/',       masterDataRouter);    // /fields, /sub-blocks, /devices, /cro
 app.use('/ingest', ingestRouter);        // POST /ingest/batch
 app.use('/telemetry', telemetryQueryRouter); // GET /telemetry/sub-blocks/:subBlockId/history
 app.use('/',            recommendationsRouter); // /fields/:id/recommendations, /alerts, ...
+app.use('/fields', agronomicTreatmentsRouter); // POST /fields/:id/agronomic-treatments
 app.use('/assignments', assignmentsRouter);    // GET /assignments/pending, /completed | POST /assignments/:id/action
 app.use('/',       orthomosaicRouter);     // /fields/:id/orthomosaic, /map-layers, ...
 app.use('/',       mapVisualRouter);       // /fields/:id/map-visual, ...

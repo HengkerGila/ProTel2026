@@ -14,6 +14,7 @@ import {
   subBlockCurrentStates as currentStatesTable,
   irrigationRecommendations as recsTable,
   managementEvents as managementEventsTable,
+  agronomicTreatments as agronomicTreatmentsTable,
 } from '@/db/schema';
 import { getLatestForecast, getActiveWarnings } from '@/modules/weather/bmkg.service';
 import { buildFieldStates } from '@/modules/state-builder/state-builder.service';
@@ -194,6 +195,27 @@ export async function runDecisionCycleForField(
       flagMap.set(f.subBlockId, arr);
     });
 
+    // 7.5 Load agronomic treatments overrides
+    const treatmentRows = await db.select().from(agronomicTreatmentsTable)
+      .where(and(
+        eq(agronomicTreatmentsTable.fieldId, fieldId),
+        sql`${agronomicTreatmentsTable.overrideExpiresAt} > NOW()`,
+      ));
+    const treatmentMap = new Map<string, typeof agronomicTreatmentsTable.$inferSelect>();
+    treatmentRows.forEach(t => {
+      if (t.subBlockId) {
+        // subBlock specific
+        treatmentMap.set(t.subBlockId, t);
+      } else {
+        // field level - applied to all subblocks
+        subBlocks.forEach(sb => {
+          if (!treatmentMap.has(sb.id)) {
+            treatmentMap.set(sb.id, t);
+          }
+        });
+      }
+    });
+
     // 8. Load flow paths / matrix for field
     const [flowPath] = await db.select().from(flowPathsTable)
       .where(and(
@@ -234,16 +256,28 @@ export async function runDecisionCycleForField(
           hst: cycle.currentHst,
           variety_name: cycle.varietyName,
         } : null,
-        rule_profile: rule ? {
-          id: rule.id,
-          awd_lower_threshold_cm: parseFloat(rule.awdLowerThresholdCm),
-          awd_upper_target_cm: parseFloat(rule.awdUpperTargetCm),
-          drought_alert_cm: rule.droughtAlertCm ? parseFloat(rule.droughtAlertCm) : null,
-          priority_weight: parseFloat(rule.priorityWeight),
-          rain_delay_mm: parseFloat(rule.rainDelayMm),
-          target_confidence: rule.targetConfidence,
-          rainfed_modifier_pct: parseFloat(rule.rainfedModifierPct),
-        } : null,
+        rule_profile: rule ? (() => {
+          const baseRule = {
+            id: rule.id,
+            awd_lower_threshold_cm: parseFloat(rule.awdLowerThresholdCm),
+            awd_upper_target_cm: parseFloat(rule.awdUpperTargetCm),
+            drought_alert_cm: rule.droughtAlertCm ? parseFloat(rule.droughtAlertCm) : null,
+            priority_weight: parseFloat(rule.priorityWeight),
+            rain_delay_mm: parseFloat(rule.rainDelayMm),
+            target_confidence: rule.targetConfidence,
+            rainfed_modifier_pct: parseFloat(rule.rainfedModifierPct),
+          };
+
+          // Override rule profile with agronomic treatment target water level
+          const treatment = treatmentMap.get(sb.id);
+          if (treatment) {
+            const targetCm = parseFloat(treatment.targetWaterLevelCm);
+            // Lock the lower threshold and upper target tightly around the medicine target
+            baseRule.awd_upper_target_cm = targetCm;
+            baseRule.awd_lower_threshold_cm = targetCm - 1; // 1 cm tolerance
+          }
+          return baseRule;
+        })() : null,
         management_flags: flags.map(f => ({
           event_type: f.eventType,
           flag_text: f.attentionFlagText,

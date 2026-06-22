@@ -434,6 +434,26 @@ export const orthomosaicPublishHistory = trx.table('orthomosaic_publish_history'
 });
 
 // ---------------------------------------------------------------------------
+// trx.agronomic_treatments
+// ---------------------------------------------------------------------------
+export const agronomicTreatments = trx.table('agronomic_treatments', {
+  id:                  uuid('id').primaryKey().defaultRandom(),
+  fieldId:             uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
+  subBlockId:          uuid('sub_block_id').references(() => subBlocks.id, { onDelete: 'set null' }),
+  cropCycleId:         uuid('crop_cycle_id').references(() => cropCycles.id, { onDelete: 'set null' }),
+  treatmentType:       text('treatment_type').notNull(),
+  productName:         text('product_name').notNull(),
+  targetWaterLevelCm:  numeric('target_water_level_cm', { precision: 7, scale: 2 }).notNull(),
+  appliedAt:           timestamp('applied_at', { withTimezone: true }).notNull().defaultNow(),
+  activeDurationHours: integer('active_duration_hours').notNull(),
+  overrideExpiresAt:   timestamp('override_expires_at', { withTimezone: true }).notNull(),
+  reportedBy:          uuid('reported_by').references(() => users.id),
+  notes:               text('notes'),
+  createdAt:           timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:           timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
 // trx.dss_tasks
 // ---------------------------------------------------------------------------
 export const dssTasks = trx.table('dss_tasks', {

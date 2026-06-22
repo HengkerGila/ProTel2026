@@ -7,7 +7,8 @@ import {
   Droplets,
   Sprout,
   ShieldAlert,
-  Bell
+  Bell,
+  Syringe
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,6 +47,15 @@ export function DssPage() {
   
   const [loadingTop, setLoadingTop] = useState(false);
   const [lastEvaluated, setLastEvaluated] = useState<string | null>(null);
+
+  // Treatment form state
+  const [showTreatmentModal, setShowTreatmentModal] = useState(false);
+  const [treatmentForm, setTreatmentForm] = useState({
+    treatmentType: 'fertilizer',
+    productName: '',
+    targetWaterLevelCm: 0,
+    activeDurationHours: 72
+  });
 
   // Load fields
   useEffect(() => {
@@ -113,6 +123,19 @@ export function DssPage() {
     }
   };
 
+  const handleSubmitTreatment = async () => {
+    if (!treatmentForm.productName) return alert('Nama obat/pupuk wajib diisi');
+    try {
+      await apiClient.post(`/fields/${selectedFieldId}/agronomic-treatments`, treatmentForm);
+      setShowTreatmentModal(false);
+      alert('Perlakuan berhasil dicatat! Sistem DSS akan otomatis menyesuaikan target air sesuai durasi.');
+      fetchDssData(selectedFieldId);
+    } catch (err) {
+      console.error('Failed to submit treatment', err);
+      alert('Gagal mencatat perlakuan.');
+    }
+  };
+
   const getActionColor = (action: string) => {
     switch (action) {
       case 'irrigate': return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
@@ -155,6 +178,12 @@ export function DssPage() {
             Refresh
           </Button>
 
+          {selectedFieldId && (
+            <Button variant="secondary" size="sm" onClick={() => setShowTreatmentModal(true)} className="ml-2">
+              <Syringe className="h-4 w-4 mr-2" /> Catat Obat/Pupuk
+            </Button>
+          )}
+
           {lastEvaluated && (
             <span className="text-xs text-muted-foreground ml-auto hidden md:block">
               Update Terakhir: {new Date(lastEvaluated).toLocaleString()}
@@ -162,6 +191,64 @@ export function DssPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Treatment Modal */}
+      {showTreatmentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-md shadow-lg animate-in fade-in zoom-in-95">
+            <CardHeader>
+              <CardTitle>Input Perlakuan Manual (Obat/Pupuk)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-sm font-semibold">Tipe Perlakuan</label>
+                <select 
+                  className="w-full h-9 rounded-md border px-3 text-sm"
+                  value={treatmentForm.treatmentType}
+                  onChange={(e) => setTreatmentForm({...treatmentForm, treatmentType: e.target.value})}
+                >
+                  <option value="fertilizer">Pupuk</option>
+                  <option value="pesticide">Pestisida</option>
+                  <option value="herbicide">Herbisida</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold">Nama Produk</label>
+                <input 
+                  type="text" 
+                  className="w-full h-9 rounded-md border px-3 text-sm"
+                  placeholder="Misal: Urea / NPK"
+                  value={treatmentForm.productName}
+                  onChange={(e) => setTreatmentForm({...treatmentForm, productName: e.target.value})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold">Target Tinggi Air Optimal (cm)</label>
+                <input 
+                  type="number" 
+                  step="0.1"
+                  className="w-full h-9 rounded-md border px-3 text-sm"
+                  value={treatmentForm.targetWaterLevelCm}
+                  onChange={(e) => setTreatmentForm({...treatmentForm, targetWaterLevelCm: parseFloat(e.target.value)})}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold">Durasi Efek Target (Jam)</label>
+                <input 
+                  type="number" 
+                  className="w-full h-9 rounded-md border px-3 text-sm"
+                  value={treatmentForm.activeDurationHours}
+                  onChange={(e) => setTreatmentForm({...treatmentForm, activeDurationHours: parseInt(e.target.value, 10)})}
+                />
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setShowTreatmentModal(false)}>Batal</Button>
+              <Button onClick={handleSubmitTreatment}>Simpan & Sesuaikan Air</Button>
+            </CardFooter>
+          </Card>
+        </div>
+      )}
 
       {!selectedFieldId ? (
          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border rounded-lg">
