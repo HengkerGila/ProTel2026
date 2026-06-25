@@ -16,8 +16,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { apiClient, gisProcClient } from '@/api/client';
 import axios from 'axios';
-import { getCachedMapImageUrl } from '@/lib/mapCache';
-import { MapPin, Loader2, Info, X, Droplets, Battery, Thermometer, Layers, AlertTriangle, CheckCircle2, Activity, Route, GitMerge, ArrowRight } from 'lucide-react';
+import { getCachedMapImageUrl, clearMapCache } from '@/lib/mapCache';
+import { MapPin, Loader2, Info, X, Droplets, Battery, Thermometer, Layers, AlertTriangle, CheckCircle2, Activity, Route, GitMerge, ArrowRight, RefreshCw } from 'lucide-react';
 
 interface Field {
   id: string;
@@ -516,6 +516,26 @@ export function MapPage() {
   const [fields, setFields] = useState<Field[]>([]);
   const [selectedFieldId, setSelectedFieldId] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState<number>(0);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefreshMap = async () => {
+    const field = fields.find(f => f.id === selectedFieldId);
+    if (!field) return;
+
+    try {
+      setRefreshing(true);
+      if (field.mapVisualUrl) {
+        await clearMapCache(field.mapVisualUrl, field.name);
+      }
+      setRefreshKey(prev => prev + 1);
+    } catch (err) {
+      console.error('Failed to refresh map cache', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   
   const [selectedSubBlock, setSelectedSubBlock] = useState<{ id: string; name: string } | null>(null);
   const [telemetryHistory, setTelemetryHistory] = useState<any[]>([]);
@@ -523,7 +543,7 @@ export function MapPage() {
 
   const [fieldHistory, setFieldHistory] = useState<any[]>([]);
   const [loadingFieldHistory, setLoadingFieldHistory] = useState(false);
-  const [activeTab, setActiveTab] = useState<'water' | 'temp' | 'humidity'>('water');
+  const [activeTab, setActiveTab] = useState<'water' | 'temp'>('water');
 
   const [subBlocks, setSubBlocks] = useState<SubBlock[]>([]);
   const [loadingSubBlocks, setLoadingSubBlocks] = useState(false);
@@ -545,10 +565,6 @@ export function MapPage() {
   const [irrigationPoints, setIrrigationPoints] = useState<IrrigationPoint[]>([]);
   const [embankments, setEmbankments] = useState<Embankment[]>([]);
   const [devices, setDevices] = useState<any[]>([]);
-
-
-
-
 
   const fetchMatrixResult = async () => {
     try {
@@ -1009,7 +1025,7 @@ export function MapPage() {
     };
 
     fetchHeaders(field.mapVisualUrl, field.name);
-  }, [selectedFieldId, fields]);
+  }, [selectedFieldId, fields, refreshKey]);
 
   // Fetch rule profiles (global, fetched once)
   useEffect(() => {
@@ -1366,7 +1382,7 @@ export function MapPage() {
               'EPSG:3857'
             );
             
-            const imageUrl = await getCachedMapImageUrl(field.mapVisualUrl);
+            const imageUrl = await getCachedMapImageUrl(field.mapVisualUrl, field.name);
             
             imageLayer.current.setSource(new ImageStatic({
               url: imageUrl,
@@ -1403,7 +1419,7 @@ export function MapPage() {
     };
 
     fetchData();
-  }, [selectedFieldId, map]);
+  }, [selectedFieldId, map, refreshKey]);
 
   return (
     <div className="flex flex-col min-h-[calc(100vh-140px)] gap-6 animate-in fade-in pb-12">
@@ -1574,8 +1590,11 @@ export function MapPage() {
         )}
 
         <div className="absolute top-4 right-4 z-20 flex flex-col gap-2">
-           <Card className="shadow-md bg-background/90 backdrop-blur">
+           <Card className="shadow-md bg-background/90 backdrop-blur min-w-[200px]">
              <CardContent className="p-3 text-xs space-y-2">
+                <div className="font-bold text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                   Menu & Legenda
+                </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 border-2 border-green-600 bg-green-500/20 rounded-sm"></div>
                   <span>Petak Sawah (Sub-block)</span>
@@ -1583,6 +1602,22 @@ export function MapPage() {
                 <div className="flex items-center gap-2">
                    <div className="w-3 h-3 rounded-full bg-blue-500 shadow-sm border border-white"></div>
                    <span>Device / Sensor (AWD) ({devices.length})</span>
+                </div>
+                <div className="border-t border-slate-200 dark:border-slate-800 pt-2 mt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-[10px] h-8 flex items-center justify-center gap-1.5 transition-transform active:scale-95 duration-100"
+                    onClick={handleRefreshMap}
+                    disabled={refreshing}
+                  >
+                    {refreshing ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3" />
+                    )}
+                    Update Peta
+                  </Button>
                 </div>
              </CardContent>
            </Card>
@@ -1636,12 +1671,6 @@ export function MapPage() {
             >
               Suhu Udara (°C)
             </button>
-            <button 
-              onClick={() => setActiveTab('humidity')}
-              className={`pb-2 px-1 font-semibold transition-colors border-b-2 text-xs md:text-sm whitespace-nowrap ${activeTab === 'humidity' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-            >
-              Kelembapan (%)
-            </button>
           </div>
 
           {loadingFieldHistory ? (
@@ -1680,13 +1709,6 @@ export function MapPage() {
                       <text x="5" y="165" className="text-[10px] fill-muted-foreground font-semibold font-mono">15°</text>
                     </>
                   )}
-                  {activeTab === 'humidity' && (
-                    <>
-                      <text x="5" y="45" className="text-[10px] fill-muted-foreground font-semibold font-mono">100%</text>
-                      <text x="5" y="105" className="text-[10px] fill-muted-foreground font-semibold font-mono">70%</text>
-                      <text x="5" y="165" className="text-[10px] fill-muted-foreground font-semibold font-mono">40%</text>
-                    </>
-                  )}
 
                   {/* Group Data By Sub-block */}
                   {Array.from(new Set(fieldHistory.map(d => d.sub_block_name))).map((sbName: any, idx) => {
@@ -1707,9 +1729,6 @@ export function MapPage() {
                        } else if (activeTab === 'temp') {
                          val = parseFloat(d.temperature_c || 25);
                          y = 100 - ((val - 25) / 10) * 60; // range 15 ke 35
-                       } else if (activeTab === 'humidity') {
-                         val = parseFloat(d.humidity_pct || 70);
-                         y = 100 - ((val - 70) / 30) * 60; // range 40 ke 100
                        }
 
                        return `${x},${Math.max(20, Math.min(180, y))}`;
