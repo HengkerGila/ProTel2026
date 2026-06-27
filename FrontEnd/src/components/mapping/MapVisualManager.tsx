@@ -18,6 +18,57 @@ const DEFAULT_WEBODM_PROGRESS: WebodmSseProgress = {
   webodmPercent: null,
 };
 
+const parseVideoPercent = (status: string): number | null => {
+  if (!status) return null;
+
+  try {
+    const parsed = JSON.parse(status);
+    if (typeof parsed.percent === 'number') return parsed.percent;
+    if (typeof parsed.percentage === 'number') return parsed.percentage;
+    if (typeof parsed.progress === 'number') {
+      return parsed.progress <= 1 ? parsed.progress * 100 : parsed.progress;
+    }
+    if (typeof parsed.status === 'string') {
+      status = parsed.status;
+    } else if (typeof parsed.message === 'string') {
+      status = parsed.message;
+    }
+  } catch {
+    // ignore JSON parse error
+  }
+
+  const percentMatch = status.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (percentMatch) {
+    const val = parseFloat(percentMatch[1]);
+    if (!isNaN(val) && val >= 0 && val <= 100) {
+      return val;
+    }
+  }
+
+  const fractionMatch = status.match(/(\d+)\s*(?:\/|of)\s*(\d+)/i);
+  if (fractionMatch) {
+    const current = parseInt(fractionMatch[1], 10);
+    const total = parseInt(fractionMatch[2], 10);
+    if (total > 0 && current <= total) {
+      return (current / total) * 100;
+    }
+  }
+
+  return null;
+};
+
+const cleanSseStatus = (status: string): string => {
+  if (!status) return '';
+  try {
+    const parsed = JSON.parse(status);
+    if (typeof parsed.status === 'string') return parsed.status;
+    if (typeof parsed.message === 'string') return parsed.message;
+  } catch {
+    // ignore JSON parse error
+  }
+  return status;
+};
+
 interface MapVisualManagerProps {
   fieldId: string;
   fieldName: string;
@@ -52,7 +103,7 @@ export function MapVisualManager({
   const srtInputRef = useRef<HTMLInputElement>(null);
 
   // Parse options state
-  const [frameIntervalSec, setFrameIntervalSec] = useState<number>(1);
+  const frameIntervalSec = 2;
   const [startSec, setStartSec] = useState<number>(0);
   const [endSec, setEndSec] = useState<number | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -576,20 +627,7 @@ export function MapVisualManager({
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3">
-            {/* Frame Interval in Seconds */}
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">Interval Frame (detik)</label>
-              <input
-                type="number"
-                min={0.1}
-                step={0.1}
-                value={frameIntervalSec}
-                onChange={(e) => setFrameIntervalSec(parseFloat(e.target.value))}
-                className="border rounded-md bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-
+          <div className="grid grid-cols-2 gap-3">
             {/* Start Second */}
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
@@ -640,28 +678,77 @@ export function MapVisualManager({
 
           {/* SSE Progress Panel — shown while a job is active */}
           {activeJobId && (
-            <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
+            <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+              {/* Status Banner */}
+              <div className={`flex items-center gap-2 rounded-md px-3 py-2 ${
+                sseError
+                  ? 'border border-red-500/30 bg-red-500/10'
+                  : sseDone
+                  ? 'border border-green-500/30 bg-green-500/10'
+                  : 'border border-blue-500/30 bg-blue-500/10'
+              }`}>
                 {!sseDone && !sseError && (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />
-                    <p className="text-xs text-foreground flex-1 truncate">
-                      {sseStatus || 'Menunggu...'}
-                    </p>
-                  </>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
                 )}
                 {sseDone && (
-                  <>
-                    <Check className="h-4 w-4 text-green-600 shrink-0" />
-                    <p className="text-xs text-green-600 font-medium flex-1">
-                      {sseStatus || 'Selesai'}
-                    </p>
-                  </>
+                  <Check className="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />
                 )}
                 {sseError && (
-                  <p className="text-xs text-destructive flex-1">{sseError}</p>
+                  <AlertTriangle className="h-3.5 w-3.5 text-red-600 dark:text-red-400 shrink-0" />
                 )}
+                <span className={`text-xs font-semibold ${
+                  sseError
+                    ? 'text-red-700 dark:text-red-400'
+                    : sseDone
+                    ? 'text-green-700 dark:text-green-400'
+                    : 'text-blue-700 dark:text-blue-400'
+                }`}>
+                  {sseError
+                    ? 'Gagal'
+                    : sseDone
+                    ? 'Selesai'
+                    : 'Mengolah Video...'}
+                </span>
               </div>
+
+              {/* Error detail */}
+              {sseError && (
+                <p className="text-xs text-destructive">{sseError}</p>
+              )}
+
+              {/* Stage & Progress */}
+              {!sseError && (
+                <div className="space-y-1.5">
+                  {sseStatus && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground truncate mr-2">
+                        Status: <span className="font-mono text-xs text-foreground bg-muted/50 px-1.5 py-0.5 rounded">{cleanSseStatus(sseStatus)}</span>
+                      </p>
+                      {parseVideoPercent(sseStatus) !== null && (
+                        <span className="text-xs font-semibold text-foreground shrink-0">
+                          {Math.round(parseVideoPercent(sseStatus)!)}%
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Progress Bar */}
+                  <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
+                    {parseVideoPercent(sseStatus) !== null ? (
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ease-out ${
+                          sseDone ? 'bg-green-500' : 'bg-blue-500'
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(0, parseVideoPercent(sseStatus)!))}%` }}
+                      />
+                    ) : (
+                      !sseDone && (
+                        <div className="h-full w-1/3 rounded-full bg-blue-500/60 animate-pulse" />
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
 
               {(sseDone || sseError) && (
                 <Button

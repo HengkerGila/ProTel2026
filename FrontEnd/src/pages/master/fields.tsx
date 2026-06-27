@@ -263,6 +263,20 @@ export function FieldsPage() {
         onClose={() => setDetailEntity(null)} 
         title="Detail Lahan (Field)"
         data={detailEntity}
+        excludeKeys={[
+          'id', 
+          'operatorCountDefault', 
+          'operator_count_default', 
+          'notes', 
+          'mapVisualUrl', 
+          'map_visual_url', 
+          'mapBounds', 
+          'map_bounds',
+          'irrigationEdges',
+          'irrigation_edges',
+          'irrigationNodes',
+          'irrigation_nodes'
+        ]}
       />
     </div>
   );

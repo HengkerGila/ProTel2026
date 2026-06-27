@@ -26,6 +26,7 @@ interface SubBlock {
   name: string;
   code: string | null;
   elevationM: string | null;
+  elevationCalibration?: string | number | null;
   soilType: string | null;
   isActive: boolean;
   polygonGeom?: any;
@@ -38,6 +39,7 @@ interface IrrigationPoint {
   pointType: 'source' | 'drain';
   coordinatePoint: any;
   elevationM: string | null;
+  callibratedElevation?: string | number | null;
   name?: string | null;
   assignedSubBlocks?: string[] | null;
 }
@@ -353,7 +355,15 @@ export function SubBlocksPage() {
                           )}
                         </td>
                         <td className="px-6 py-4 code font-mono text-xs">{sb.code || '-'}</td>
-                        <td className="px-6 py-4">{sb.elevationM ? `${sb.elevationM} m` : '-'}</td>
+                        <td className="px-6 py-4">
+                          {(() => {
+                            if (sb.elevationCalibration !== null && sb.elevationCalibration !== undefined) {
+                              const cal = parseFloat(sb.elevationCalibration.toString());
+                              return `${cal.toFixed(2)} m`;
+                            }
+                            return sb.elevationM ? `${parseFloat(sb.elevationM).toFixed(2)} m` : '-';
+                          })()}
+                        </td>
                         <td className="px-6 py-4 capitalize">{sb.soilType || '-'}</td>
                         <td className="px-6 py-4">
                           {sb.devices && sb.devices.length > 0 ? (
@@ -545,7 +555,14 @@ export function SubBlocksPage() {
                                 .join(', ');
                             })()}
                           </td>
-                          <td className="px-6 py-4">{ip.elevationM ? `${ip.elevationM} m` : '-'}</td>
+                          <td className="px-6 py-4">
+                            {(() => {
+                              const elev = ip.callibratedElevation !== null && ip.callibratedElevation !== undefined
+                                ? ip.callibratedElevation
+                                : ip.elevationM;
+                              return elev ? `${parseFloat(elev.toString()).toFixed(2)} m` : '-';
+                            })()}
+                          </td>
                           <td className="px-6 py-4 text-right flex justify-end gap-2">
                             <Button 
                               variant="ghost" 
