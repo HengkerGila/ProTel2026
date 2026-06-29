@@ -285,7 +285,7 @@ export const weatherWarningSnapshots = trx.table('weather_warning_snapshots', {
   warningType:      text('warning_type'),
   warningLevel:     text('warning_level'),
   validFrom:        timestamp('valid_from', { withTimezone: true }),
-  warningExpiresAt: timestamp('warning_expires_at', { withTimezone: true }),
+  warningExpiresAt: timestamp('valid_until', { withTimezone: true }),
   warningText:      text('warning_text'),
   dssAction:        text('dss_action').default('none'),
   fullResponseJson: jsonb('full_response_json'),

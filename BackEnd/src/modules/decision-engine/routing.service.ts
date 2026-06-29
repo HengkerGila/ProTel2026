@@ -95,6 +95,7 @@ export async function runWaterRouting(
   const subBlockRows = await db
     .select({
       id: subBlocksTable.id,
+      code: subBlocksTable.code,
       areaM2: subBlocksTable.areaM2,
       elevationM: subBlocksTable.elevationM,
       elevationCalibration: subBlocksTable.elevationCalibration,
@@ -238,7 +239,7 @@ export async function runWaterRouting(
       area: parseFloat(n.areaM2 ?? '100'),
       water_height: waterHeightM,
       optimal_height: optimalHeightM,
-      elevation: parseFloat(sb.elevationM ?? '0') + parseFloat(sb.elevationCalibration ?? '0'),
+      elevation: parseFloat(n.elevationM ?? '0') + parseFloat(n.elevationCalibration ?? '0'),
     };
   });
 
@@ -290,7 +291,7 @@ export async function runWaterRouting(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        num_nodes: subBlockRows.length,
+        num_nodes: nodes.length,
         nodes,
         edges,
         directed: true,

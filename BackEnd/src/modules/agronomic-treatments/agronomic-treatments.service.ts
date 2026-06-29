@@ -1,7 +1,8 @@
 import { db } from '@/db/client';
 import { agronomicTreatments } from '@/db/schema';
 import { eq, and, gt } from 'drizzle-orm';
-import { AppError } from '@/shared/utils/error.util';
+import { AppError } from '@/middleware/error.middleware';
+import { runDecisionCycleForField } from '@/modules/decision-engine/engine-client.service';
 
 export class AgronomicTreatmentsService {
   /**
@@ -10,13 +11,13 @@ export class AgronomicTreatmentsService {
   async createTreatment(
     fieldId: string,
     data: {
-      subBlockId?: string;
-      cropCycleId?: string;
+      subBlockId?: string | null;
+      cropCycleId?: string | null;
       treatmentType: string;
       productName: string;
       targetWaterLevelCm: number;
       activeDurationHours: number;
-      notes?: string;
+      notes?: string | null;
     },
     userId?: string
   ) {
@@ -37,6 +38,11 @@ export class AgronomicTreatmentsService {
         notes: data.notes || null,
       })
       .returning();
+
+    // Trigger immediate AI re-evaluation so UI recommendations update instantly
+    await runDecisionCycleForField(fieldId, 'normal').catch(err => {
+      console.error('Failed to trigger real-time decision cycle on treatment creation:', err);
+    });
 
     return treatment;
   }
