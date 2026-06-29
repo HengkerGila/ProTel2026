@@ -16,6 +16,7 @@ import {
 } from '@/db/schema/mst';
 import { managementEvents as managementEventsTable } from '@/db/schema';
 import { telemetryRecords as telemetryRecordsTable } from '@/db/schema/trx';
+import { recalibrateFieldElevations } from '../telemetry/elevation-calibration';
 import { AppError } from '@/middleware/error.middleware';
 import { parsePagination, buildPaginationMeta } from '@/shared/utils/pagination.util';
 import type {
@@ -129,6 +130,7 @@ export const fieldsService = {
         notes:                  input.notes,
         mapVisualUrl:           `${GISPROC_API_BASE_URI}/webodm/display?project_name=${createdByUserId}&task_name=${input.name}&asset_type=orthophoto.tif`,
         assignedFileName:       input.assigned_file_name,
+        mapHeaders:             input.map_headers,
         irrigationEdges:        input.irrigation_edges,
         irrigationNodes:        input.irrigation_nodes,
       })
@@ -159,6 +161,7 @@ export const fieldsService = {
         ...(input.is_source_depleted    !== undefined && { isSourceDepleted: input.is_source_depleted }),
         ...(input.notes                 !== undefined && { notes: input.notes }),
         ...(input.assigned_file_name    !== undefined && { assignedFileName: input.assigned_file_name }),
+        ...(input.map_headers           !== undefined && { mapHeaders: input.map_headers }),
         ...(input.irrigation_edges      !== undefined && { irrigationEdges: input.irrigation_edges }),
         ...(input.irrigation_nodes      !== undefined && { irrigationNodes: input.irrigation_nodes }),
         updatedAt: new Date(),
@@ -772,19 +775,16 @@ export const devicesService = {
         refElevationM = parseFloat(stationPoint.elevationM.toString());
       }
 
-      const elevationVal = 44330 * (1 - Math.pow(pressureVal / 1013.25, 0.1903));
-      const calibrationOffset = elevationVal - refElevationM;
-
-      await db.update(subBlocksTable)
-        .set({
-          elevationCalibration: sql`COALESCE(${subBlocksTable.elevationM}, 0) + ${calibrationOffset.toFixed(2)}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(subBlocksTable.fieldId, device.fieldId));
+      await recalibrateFieldElevations(device.fieldId, input.sub_block_id, pressureVal);
     }
   },
 
   async unassign(deviceId: string, unassignedBy: string) {
+    const [device] = await db.select({ fieldId: devicesTable.fieldId })
+      .from(devicesTable)
+      .where(eq(devicesTable.id, deviceId))
+      .limit(1);
+
     await db.update(deviceAssignmentsTable)
       .set({ unassignedAt: new Date(), unassignedBy })
       .where(and(
@@ -795,6 +795,10 @@ export const devicesService = {
     await db.update(devicesTable)
       .set({ subBlockId: null, updatedAt: new Date() })
       .where(eq(devicesTable.id, deviceId));
+
+    if (device) {
+      await recalibrateFieldElevations(device.fieldId);
+    }
   },
 
   async calibrate(deviceId: string, input: CalibrateDeviceInput, calibratedBy: string) {
@@ -926,7 +930,7 @@ async function calculateAssignedSubBlocksForPoint(fieldId: string, coordinatePoi
   .where(and(
     eq(embankmentsTable.fieldId, fieldId),
     eq(embankmentsTable.isActive, true),
-    sql`ST_Intersects(${embankmentsTable.polygonGeom}::geometry, ST_GeomFromGeoJSON(${geomJson}))`
+    sql`ST_Intersects(ST_SetSRID(${embankmentsTable.polygonGeom}::geometry, 4326), ST_GeomFromGeoJSON(${geomJson}))`
   ));
 
   for (const emb of intersectingEmbankments) {
@@ -942,7 +946,7 @@ async function calculateAssignedSubBlocksForPoint(fieldId: string, coordinatePoi
   .where(and(
     eq(subBlocksTable.fieldId, fieldId),
     eq(subBlocksTable.isActive, true),
-    sql`ST_Intersects(${subBlocksTable.polygonGeom}::geometry, ST_GeomFromGeoJSON(${geomJson}))`
+    sql`ST_Intersects(ST_SetSRID(${subBlocksTable.polygonGeom}::geometry, 4326), ST_GeomFromGeoJSON(${geomJson}))`
   ));
 
   intersectingSubBlocks.forEach(row => subBlockIds.add(row.id));
@@ -1165,13 +1169,12 @@ export const cropCyclesService = {
 
 type RawRuleProfile = typeof ruleProfilesTable.$inferSelect;
 
-/** Coerce numeric string columns returned by PostgreSQL into JS numbers. */
 function parseRuleProfileNumerics(profile: RawRuleProfile) {
+  const awdUpperTarget = parseFloat(profile.awdUpperTargetCm);
   return {
     ...profile,
-    awdLowerThresholdCm: parseFloat(profile.awdLowerThresholdCm),
-    awdUpperTargetCm:    parseFloat(profile.awdUpperTargetCm),
-    droughtAlertCm:      profile.droughtAlertCm != null ? parseFloat(profile.droughtAlertCm) : null,
+    awdUpperTargetCm:    awdUpperTarget,
+    droughtAlertCm:      profile.droughtAlertCm != null ? parseFloat(profile.droughtAlertCm) : (awdUpperTarget - 10),
     rainDelayMm:         parseFloat(profile.rainDelayMm),
     priorityWeight:      parseFloat(profile.priorityWeight),
   };
@@ -1196,7 +1199,6 @@ export const ruleProfilesService = {
       description:            input.description,
       bucketCode:             input.bucket_code,
       phaseCode:              input.phase_code,
-      awdLowerThresholdCm:    input.awd_lower_threshold_cm.toString(),
       awdUpperTargetCm:       input.awd_upper_target_cm.toString(),
       droughtAlertCm:         input.drought_alert_cm?.toString(),
       minSaturationDays:      input.min_saturation_days,
@@ -1223,7 +1225,6 @@ export const ruleProfilesService = {
         ...(input.description !== undefined && { description: input.description }),
         ...(input.bucket_code !== undefined && { bucketCode: input.bucket_code }),
         ...(input.phase_code !== undefined && { phaseCode: input.phase_code }),
-        ...(input.awd_lower_threshold_cm !== undefined && { awdLowerThresholdCm: input.awd_lower_threshold_cm.toString() }),
         ...(input.awd_upper_target_cm !== undefined && { awdUpperTargetCm: input.awd_upper_target_cm.toString() }),
         ...(input.drought_alert_cm !== undefined && { droughtAlertCm: input.drought_alert_cm?.toString() }),
         ...(input.min_saturation_days !== undefined && { minSaturationDays: input.min_saturation_days }),

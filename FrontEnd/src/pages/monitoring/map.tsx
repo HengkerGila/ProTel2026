@@ -12,6 +12,8 @@ import { Style, Fill, Stroke, Text, Circle as CircleStyle } from 'ol/style';
 import { fromLonLat, transformExtent } from 'ol/proj';
 import ImageLayer from 'ol/layer/Image';
 import ImageStatic from 'ol/source/ImageStatic';
+import Feature from 'ol/Feature';
+import LineString from 'ol/geom/LineString';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,12 +21,14 @@ import { apiClient, gisProcClient } from '@/api/client';
 import axios from 'axios';
 import { getCachedMapImageUrl, clearMapCache } from '@/lib/mapCache';
 import { MapPin, Loader2, Info, X, Droplets, Battery, Thermometer, Layers, AlertTriangle, CheckCircle2, Activity, Route, GitMerge, ArrowRight, RefreshCw, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface Field {
   id: string;
   name: string;
   mapVisualUrl?: string | null;
   mapBounds?: number[][] | null;
+  mapHeaders?: any;
   irrigationEdges?: any[] | null;
   irrigationNodes?: any[] | null;
 }
@@ -49,7 +53,6 @@ interface RuleProfile {
   description: string;
   bucketCode: string;
   phaseCode: string;
-  awdLowerThresholdCm: number;
   awdUpperTargetCm: number;
   droughtAlertCm: number | null;
   rainDelayMm: number;
@@ -78,6 +81,7 @@ interface IrrigationPoint {
   pointType: 'source' | 'drain';
   coordinatePoint: any;
   elevationM: string | null;
+  callibratedElevation?: string | number | null;
   name?: string | null;
   assignedSubBlocks?: string[] | null;
 }
@@ -132,15 +136,62 @@ function parseWktPoint(wkt: string | null): [number, number] | null {
 }
 
 // Parse a GeoJSON polygon string into coordinate rings
+const _wkbFormat = new WKB();
+const _geojsonFormat = new GeoJSON();
+
 function parsePolygonCoords(geomStr: string | null): [number, number][][] | null {
   if (!geomStr) return null;
   try {
+    // WKB hex string (starts with '01' or '00' — binary hex encoding used by PostGIS)
+    if (typeof geomStr === 'string' && (geomStr.startsWith('01') || geomStr.startsWith('00'))) {
+      try {
+        const olGeom = _wkbFormat.readGeometry(geomStr);
+        const geojson = _geojsonFormat.writeGeometryObject(olGeom) as any;
+        if (geojson?.type === 'Polygon') return geojson.coordinates as [number, number][][];
+        if (geojson?.type === 'MultiPolygon') return geojson.coordinates[0] as [number, number][][];
+      } catch (_) {}
+    }
+    // GeoJSON string or object
     const geom = typeof geomStr === 'string' ? JSON.parse(geomStr) : geomStr;
     if (!geom) return null;
     if (geom.type === 'Polygon') return geom.coordinates as [number, number][][];
     if (geom.type === 'MultiPolygon') return geom.coordinates[0] as [number, number][][];
   } catch (_) {}
   return null;
+}
+
+
+// Get [longitude, latitude] for any node type (SubBlock or IrrigationPoint)
+function getNodeLonLat(node: any): [number, number] | null {
+  if (!node) return null;
+
+  // 1. Check if it has a polygonGeom (e.g. SubBlock)
+  if (node.polygonGeom) {
+    const rings = parsePolygonCoords(node.polygonGeom);
+    if (rings && rings[0] && rings[0].length > 0) {
+      const lats = rings[0].map(p => p[1]);
+      const lngs = rings[0].map(p => p[0]);
+      const avgLng = lngs.reduce((a, b) => a + b, 0) / lngs.length;
+      const avgLat = lats.reduce((a, b) => a + b, 0) / lats.length;
+      return [avgLng, avgLat];
+    }
+  }
+
+  // 2. Check if it has coordinatePoint (e.g. IrrigationPoint)
+  if (node.coordinatePoint) {
+    const wkt = getNodeCentroidWkt(node);
+    const pt = parseWktPoint(wkt);
+    if (pt) return pt;
+  }
+
+  // 3. Fallback to centroid WKT
+  if (node.centroid) {
+    const pt = parseWktPoint(node.centroid);
+    if (pt) return pt;
+  }
+
+  const wkt = getNodeCentroidWkt(node);
+  return parseWktPoint(wkt);
 }
 
 // Build SVG polygon points string from geo-coordinates using a projection function
@@ -183,6 +234,8 @@ function IrrigationRouteGraph({
     }))
   ];
 
+  const sourcePoints = irrigationPoints.filter(ip => ip.pointType === 'source');
+
   if (routes.length === 0) {
     return (
       <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 p-3 rounded-lg border border-amber-500/20">
@@ -198,8 +251,12 @@ function IrrigationRouteGraph({
 
   // Build set of node indices on any route
   const routeNodeSet: Record<number, boolean> = {};
+  const sourceIdx = matrixResult.source ?? 0;
   sortedRoutes.forEach((route) => {
-    route.path.forEach((nodeIdx) => { routeNodeSet[nodeIdx] = true; });
+    const path = Array.isArray(route.path) && route.path.length >= 2
+      ? route.path
+      : [sourceIdx, route.target];
+    path.forEach((nodeIdx) => { routeNodeSet[nodeIdx] = true; });
   });
 
   // ── Geo-projection setup ────────────────────────────────────────────
@@ -331,9 +388,13 @@ function IrrigationRouteGraph({
     const color = getRoutePriorityColor(ratio);
     const animDuration = 1.2 + ratio * 1.4;
 
-    for (let k = 0; k < route.path.length - 1; k++) {
-      const fromIdx = route.path[k];
-      const toIdx = route.path[k + 1];
+    const routePath = Array.isArray(route.path) && route.path.length >= 2
+      ? route.path
+      : [sourceIdx, route.target];
+
+    for (let k = 0; k < routePath.length - 1; k++) {
+      const fromIdx = routePath[k];
+      const toIdx = routePath[k + 1];
       const edgeKey = `${fromIdx}-${toIdx}`;
       if (seenEdgeKeys.has(edgeKey)) continue;
       seenEdgeKeys.add(edgeKey);
@@ -506,26 +567,31 @@ function IrrigationRouteGraph({
       </div>
 
       {/* Source selector */}
-      <div className="bg-muted/40 p-4 rounded-xl border border-muted/50">
-        <div className="space-y-1.5">
-          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Sumber Air</label>
-          <select
-            value={sourceIndex}
-            onChange={(e) => setSourceIndex(parseInt(e.target.value))}
-            className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 focus:ring-2 focus:ring-primary focus:border-primary cursor-pointer text-slate-900 dark:text-slate-100 font-semibold outline-none shadow-sm"
-          >
-            {allNodes.map((node, idx) => (
-              <option
-                key={(node as any).id}
-                value={idx}
-                className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-medium"
-              >
-                {idx + 1}. {(node as any).name}
-              </option>
-            ))}
-          </select>
+      {sourcePoints.length > 1 && (
+        <div className="bg-muted/40 p-4 rounded-xl border border-muted/50">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Sumber Air</label>
+            <select
+              value={sourceIndex}
+              onChange={(e) => setSourceIndex(parseInt(e.target.value))}
+              className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg p-2.5 focus:ring-2 focus:ring-primary focus:border-primary cursor-pointer text-slate-900 dark:text-slate-100 font-semibold outline-none shadow-sm"
+            >
+              {sourcePoints.map((node) => {
+                const idx = allNodes.findIndex((n) => n.id === node.id);
+                return (
+                  <option
+                    key={node.id}
+                    value={idx}
+                    className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-medium"
+                  >
+                    {node.name || 'SUMBER'}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Geo-based water flow SVG — interactive pan/zoom */}
       <div className="relative bg-sky-950/10 dark:bg-sky-950/30 border border-sky-400/20 rounded-xl overflow-hidden select-none">
@@ -610,145 +676,189 @@ function IrrigationRouteGraph({
 
           {/* Pannable / zoomable content group */}
           <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-            {/* Hidden paths for animateMotion mpath references */}
-            {flowEdges.map((edge) => (
-              <path
-                key={`path-${edge.key}`}
-                id={`path-${edge.key}`}
-                d={`M ${edge.x1} ${edge.y1} L ${edge.x2} ${edge.y2}`}
-                fill="none"
-                stroke="none"
-              />
-            ))}
 
-            {/* Background flow lines (static, dashed) */}
-            {flowEdges.map((edge) => (
-              <line
-                key={`line-${edge.key}`}
-                x1={edge.x1} y1={edge.y1}
-                x2={edge.x2} y2={edge.y2}
-                stroke={edge.color}
-                strokeWidth={2.5 / zoom}
-                strokeOpacity="0.25"
-                strokeDasharray={`${4 / zoom} ${4 / zoom}`}
-                markerEnd={`url(#flow-arrow-${edge.key})`}
-              />
-            ))}
+            {/* Layer 1: Sub-block polygon fills (bottom) */}
+            <g>
+              {nodeSvgInfos.map((info) => {
+                if (info.isIrrigationPoint) return null;
+                const isHovered = tooltip?.nodeIdx === info.idx;
+                const fillColor = info.isSource ? '#6366f1' : info.onRoute ? '#10b981' : '#94a3b8';
+                const fillOpacity = isHovered ? 0.85 : info.onRoute || info.isSource ? 0.5 : 0.15;
+                const strokeColor = isHovered ? '#f59e0b' : info.isSource ? '#6366f1' : info.onRoute ? '#059669' : '#64748b';
+                const strokeOpacity = info.onRoute || info.isSource ? 0.9 : 0.35;
 
-            {/* Animated water droplets */}
-            {flowEdges.map((edge) => (
-              <g key={`anim-${edge.key}`}>
-                <circle r={4 / zoom} fill={edge.color} opacity="0.9">
-                  <animateMotion dur={`${edge.animDuration}s`} repeatCount="indefinite" begin="0s">
-                    <mpath href={`#path-${edge.key}`} />
-                  </animateMotion>
-                </circle>
-                <circle r={3 / zoom} fill={edge.color} opacity="0.6">
-                  <animateMotion dur={`${edge.animDuration}s`} repeatCount="indefinite" begin={`${edge.animDuration * 0.5}s`}>
-                    <mpath href={`#path-${edge.key}`} />
-                  </animateMotion>
-                </circle>
-              </g>
-            ))}
+                return (
+                  <g
+                    key={info.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={(e) => { e.stopPropagation(); handleNodeClick(info.idx, info.cx, info.cy); }}
+                  >
+                    {info.polygonSvgPoints ? (
+                      <polygon
+                        points={info.polygonSvgPoints}
+                        fill={fillColor}
+                        fillOpacity={fillOpacity}
+                        stroke={strokeColor}
+                        strokeWidth={(isHovered ? 3 : info.isSource ? 2.5 : 1.5) / zoom}
+                        strokeOpacity={strokeOpacity}
+                      />
+                    ) : (
+                      <rect
+                        x={info.cx - 14} y={info.cy - 10}
+                        width={28} height={20} rx={4}
+                        fill={fillColor} fillOpacity={fillOpacity}
+                        stroke={strokeColor} strokeWidth={(isHovered ? 3 : info.isSource ? 2.5 : 1.5) / zoom}
+                        strokeOpacity={strokeOpacity}
+                      />
+                    )}
+                  </g>
+                );
+              })}
+            </g>
 
-            {/* Sub-block polygons */}
-            {nodeSvgInfos.map((info) => {
-              if (info.isIrrigationPoint) return null;
-              const isHovered = tooltip?.nodeIdx === info.idx;
-              const fillColor = info.isSource ? '#6366f1' : info.onRoute ? '#10b981' : '#94a3b8';
-              const fillOpacity = isHovered ? 0.85 : info.onRoute || info.isSource ? 0.55 : 0.18;
-              const strokeColor = isHovered ? '#f59e0b' : info.isSource ? '#6366f1' : info.onRoute ? '#059669' : '#64748b';
-              const strokeOpacity = info.onRoute || info.isSource ? 0.9 : 0.4;
-
-              return (
-                <g
-                  key={info.id}
-                  style={{ cursor: 'pointer' }}
-                  onClick={(e) => { e.stopPropagation(); handleNodeClick(info.idx, info.cx, info.cy); }}
-                >
-                  {info.polygonSvgPoints ? (
-                    <polygon
-                      points={info.polygonSvgPoints}
-                      fill={fillColor}
-                      fillOpacity={fillOpacity}
-                      stroke={strokeColor}
-                      strokeWidth={(isHovered ? 3 : info.isSource ? 2.5 : 1.5) / zoom}
-                      strokeOpacity={strokeOpacity}
-                    />
-                  ) : (
-                    <rect
-                      x={info.cx - 14} y={info.cy - 10}
-                      width={28} height={20} rx={4}
-                      fill={fillColor} fillOpacity={fillOpacity}
-                      stroke={strokeColor} strokeWidth={(isHovered ? 3 : info.isSource ? 2.5 : 1.5) / zoom}
-                      strokeOpacity={strokeOpacity}
-                    />
-                  )}
+            {/* Layer 2: Sub-block name labels */}
+            <g style={{ pointerEvents: 'none' }}>
+              {nodeSvgInfos.map((info) => {
+                if (info.isIrrigationPoint) return null;
+                return (
                   <text
+                    key={`label-${info.id}`}
                     x={info.cx} y={info.cy + 1}
                     textAnchor="middle" dominantBaseline="middle"
-                    fontSize={8 / zoom} fontWeight="700"
-                    fill={info.onRoute || info.isSource ? '#ffffff' : '#64748b'}
-                    style={{ pointerEvents: 'none' }}
+                    fontSize={7 / zoom} fontWeight="700"
+                    fill={info.onRoute || info.isSource ? '#ffffff' : '#94a3b8'}
+                    stroke={info.onRoute || info.isSource ? '#00000044' : 'none'}
+                    strokeWidth={2 / zoom}
+                    paintOrder="stroke"
                   >
                     {info.name.length > 10 ? info.name.slice(0, 9) + '\u2026' : info.name}
                   </text>
-                </g>
-              );
-            })}
+                );
+              })}
+            </g>
 
-            {/* Priority number badges on destination sub-blocks */}
-            {sortedRoutes.map((route, rIdx) => {
-              const range = maxRouteWeight - minRouteWeight;
-              const ratio = range > 0 ? (route.weight - minRouteWeight) / range : 0;
-              const color = getRoutePriorityColor(ratio);
-              const targetInfo = nodeSvgInfos[route.target];
-              if (!targetInfo) return null;
-              const badgeR = 8 / zoom;
-              return (
-                <g key={`badge-${rIdx}`} style={{ pointerEvents: 'none' }}>
-                  <circle cx={targetInfo.cx + 10} cy={targetInfo.cy - 10} r={badgeR} fill={color} stroke="#fff" strokeWidth={1.5 / zoom} />
-                  <text x={targetInfo.cx + 10} y={targetInfo.cy - 10} textAnchor="middle" dominantBaseline="middle" fontSize={7 / zoom} fontWeight="800" fill="#ffffff">
-                    {rIdx + 1}
-                  </text>
-                </g>
-              );
-            })}
+            {/* Layer 3: Hidden paths for animateMotion references */}
+            <g>
+              {flowEdges.map((edge) => (
+                <path
+                  key={`path-${edge.key}`}
+                  id={`path-${edge.key}`}
+                  d={`M ${edge.x1} ${edge.y1} L ${edge.x2} ${edge.y2}`}
+                  fill="none"
+                  stroke="none"
+                />
+              ))}
+            </g>
 
-            {/* Irrigation point icons */}
-            {nodeSvgInfos.map((info) => {
-              if (!info.isIrrigationPoint) return null;
-              const isWaterSource = info.pointType === 'source';
-              const bgColor = isWaterSource ? '#3b82f6' : '#f43f5e';
-              const isSelectedSource = info.idx === matrixResult.source;
-              const isHovered = tooltip?.nodeIdx === info.idx;
-              return (
-                <g
-                  key={info.id}
-                  style={{ cursor: 'pointer' }}
-                  onClick={(e) => { e.stopPropagation(); handleNodeClick(info.idx, info.cx, info.cy); }}
-                >
-                  {isSelectedSource && (
-                    <circle cx={info.cx} cy={info.cy} r={18 / zoom} fill="none" stroke="#6366f1" strokeWidth={2 / zoom} strokeDasharray={`${3 / zoom} ${2 / zoom}`} opacity="0.7">
-                      <animateTransform
-                        attributeName="transform" attributeType="XML" type="rotate"
-                        from={`0 ${info.cx} ${info.cy}`} to={`360 ${info.cx} ${info.cy}`}
-                        dur="6s" repeatCount="indefinite"
-                      />
-                    </circle>
-                  )}
-                  <circle cx={info.cx} cy={info.cy} r={13 / zoom} fill={bgColor} stroke={isHovered ? '#f59e0b' : '#ffffff'} strokeWidth={2 / zoom} opacity="0.95" />
-                  <text x={info.cx} y={info.cy + 1} textAnchor="middle" dominantBaseline="middle" fontSize={9 / zoom} fontWeight="700" fill="#ffffff">
-                    {isWaterSource ? '\ud83d\udca7' : '\u2193'}
-                  </text>
-                  <text x={info.cx} y={info.cy + 20 / zoom} textAnchor="middle" fontSize={7.5 / zoom} fontWeight="700" fill={bgColor}>
-                    {info.name.length > 8 ? info.name.slice(0, 7) + '\u2026' : info.name}
-                  </text>
-                </g>
-              );
-            })}
+            {/* Layer 4: Flow route lines (drawn on top of polygons) */}
+            <g style={{ pointerEvents: 'none' }}>
+              {/* Glow / outer stroke for contrast */}
+              {flowEdges.map((edge) => (
+                <line
+                  key={`glow-${edge.key}`}
+                  x1={edge.x1} y1={edge.y1}
+                  x2={edge.x2} y2={edge.y2}
+                  stroke="#000000"
+                  strokeWidth={6 / zoom}
+                  strokeOpacity={0.25}
+                  strokeLinecap="round"
+                />
+              ))}
+              {/* Main route lines */}
+              {flowEdges.map((edge) => (
+                <line
+                  key={`line-${edge.key}`}
+                  x1={edge.x1} y1={edge.y1}
+                  x2={edge.x2} y2={edge.y2}
+                  stroke={edge.color}
+                  strokeWidth={3 / zoom}
+                  strokeOpacity={0.95}
+                  strokeDasharray={`${5 / zoom} ${3 / zoom}`}
+                  strokeLinecap="round"
+                  markerEnd={`url(#flow-arrow-${edge.key})`}
+                />
+              ))}
+            </g>
 
-            {/* Tooltip bubble */}
+            {/* Layer 5: Animated water droplets */}
+            <g style={{ pointerEvents: 'none' }}>
+              {flowEdges.map((edge) => (
+                <g key={`anim-${edge.key}`}>
+                  <circle r={4.5 / zoom} fill={edge.color} opacity="0.95" stroke="#fff" strokeWidth={1 / zoom}>
+                    <animateMotion dur={`${edge.animDuration}s`} repeatCount="indefinite" begin="0s">
+                      <mpath href={`#path-${edge.key}`} />
+                    </animateMotion>
+                  </circle>
+                  <circle r={3 / zoom} fill={edge.color} opacity="0.6">
+                    <animateMotion dur={`${edge.animDuration}s`} repeatCount="indefinite" begin={`${edge.animDuration * 0.5}s`}>
+                      <mpath href={`#path-${edge.key}`} />
+                    </animateMotion>
+                  </circle>
+                </g>
+              ))}
+            </g>
+
+            {/* Layer 6: Priority number badges */}
+            <g style={{ pointerEvents: 'none' }}>
+              {sortedRoutes.map((route, rIdx) => {
+                const range = maxRouteWeight - minRouteWeight;
+                const ratio = range > 0 ? (route.weight - minRouteWeight) / range : 0;
+                const color = getRoutePriorityColor(ratio);
+                const targetInfo = nodeSvgInfos[route.target];
+                if (!targetInfo) return null;
+                const badgeR = 8 / zoom;
+                return (
+                  <g key={`badge-${rIdx}`}>
+                    <circle cx={targetInfo.cx + 12 / zoom} cy={targetInfo.cy - 12 / zoom} r={badgeR} fill={color} stroke="#fff" strokeWidth={1.5 / zoom} />
+                    <text
+                      x={targetInfo.cx + 12 / zoom} y={targetInfo.cy - 12 / zoom}
+                      textAnchor="middle" dominantBaseline="middle"
+                      fontSize={7 / zoom} fontWeight="800" fill="#ffffff"
+                    >
+                      {rIdx + 1}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* Layer 7: Irrigation point icons */}
+            <g>
+              {nodeSvgInfos.map((info) => {
+                if (!info.isIrrigationPoint) return null;
+                const isWaterSource = info.pointType === 'source';
+                const bgColor = isWaterSource ? '#3b82f6' : '#f43f5e';
+                const isSelectedSource = info.idx === matrixResult.source;
+                const isHovered = tooltip?.nodeIdx === info.idx;
+                return (
+                  <g
+                    key={info.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={(e) => { e.stopPropagation(); handleNodeClick(info.idx, info.cx, info.cy); }}
+                  >
+                    {isSelectedSource && (
+                      <circle cx={info.cx} cy={info.cy} r={18 / zoom} fill="none" stroke="#6366f1" strokeWidth={2 / zoom} strokeDasharray={`${3 / zoom} ${2 / zoom}`} opacity="0.7">
+                        <animateTransform
+                          attributeName="transform" attributeType="XML" type="rotate"
+                          from={`0 ${info.cx} ${info.cy}`} to={`360 ${info.cx} ${info.cy}`}
+                          dur="6s" repeatCount="indefinite"
+                        />
+                      </circle>
+                    )}
+                    <circle cx={info.cx} cy={info.cy} r={13 / zoom} fill={bgColor} stroke={isHovered ? '#f59e0b' : '#ffffff'} strokeWidth={2 / zoom} opacity="0.95" />
+                    <text x={info.cx} y={info.cy + 1} textAnchor="middle" dominantBaseline="middle" fontSize={9 / zoom} fontWeight="700" fill="#ffffff">
+                      {isWaterSource ? '💧' : '↓'}
+                    </text>
+                    <text x={info.cx} y={info.cy + 20 / zoom} textAnchor="middle" fontSize={7.5 / zoom} fontWeight="700" fill={bgColor}
+                      stroke="#00000055" strokeWidth={2 / zoom} paintOrder="stroke">
+                      {info.name.length > 8 ? info.name.slice(0, 7) + '\u2026' : info.name}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* Layer 8: Tooltip bubble (top) */}
             {tooltip !== null && tooltipNode && (() => {
               const tx = tooltipNode.cx;
               const ty = tooltipNode.cy - 24 / zoom;
@@ -771,13 +881,13 @@ function IrrigationRouteGraph({
                     height={bubbleH}
                     rx={6 / zoom}
                     fill={bubbleFill}
-                    fillOpacity="0.92"
+                    fillOpacity="0.95"
                   />
                   {/* caret */}
                   <polygon
                     points={`${tx - 5 / zoom},${ty} ${tx + 5 / zoom},${ty} ${tx},${ty + 6 / zoom}`}
                     fill={bubbleFill}
-                    fillOpacity="0.92"
+                    fillOpacity="0.95"
                   />
                   {lines.map((line, li) => (
                     <text
@@ -810,7 +920,10 @@ function IrrigationRouteGraph({
             const color = getRoutePriorityColor(ratio);
             const label = getPriorityLabel(ratio);
             const badgeBg = ratio < 0.33 ? 'bg-emerald-500' : ratio < 0.66 ? 'bg-amber-400' : 'bg-rose-400';
-            const pathNames = route.path.map(nodeIdx => {
+            const routePath = Array.isArray(route.path) && route.path.length >= 2
+              ? route.path
+              : [sourceIdx, route.target];
+            const pathNames = routePath.map((nodeIdx: number) => {
               const n = allNodes[nodeIdx] as any;
               return n ? n.name : `Petak ${nodeIdx + 1}`;
             });
@@ -883,6 +996,7 @@ function IrrigationRouteGraph({
 }
 
 export function MapPage() {
+  const dialog = useDialog();
 
   const mapRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<Map | null>(null);
@@ -947,7 +1061,6 @@ export function MapPage() {
   const [devices, setDevices] = useState<any[]>([]);
 
   // Telemetry Heatmap State & Refs
-  const [subBlockTelemetryMap, setSubBlockTelemetryMap] = useState<Record<string, any>>({});
   const subBlockTelemetryMapRef = useRef<Record<string, any>>({});
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
@@ -955,7 +1068,6 @@ export function MapPage() {
   // Auto-fetch latest telemetry state when subblocks load
   useEffect(() => {
     if (subBlocks.length === 0) {
-      setSubBlockTelemetryMap({});
       subBlockTelemetryMapRef.current = {};
       return;
     }
@@ -969,7 +1081,6 @@ export function MapPage() {
       const mapData: Record<string, any> = {};
       results.forEach(res => { if (res.telem) mapData[res.id] = res.telem; });
       subBlockTelemetryMapRef.current = mapData;
-      setSubBlockTelemetryMap(mapData);
       vectorSource.current?.changed();
     });
   }, [subBlocks]);
@@ -1028,7 +1139,40 @@ export function MapPage() {
 
       // Send the POST request to host/api/floydwarshall/matrix/multi-target
       const response = await gisProcClient.post('/api/floydwarshall/matrix/chained-routes', payload);
-      setMatrixResult(response.data);
+      
+      const data = response.data;
+      if (data && Array.isArray(data.routes) && successor) {
+        data.routes = data.routes.map((route: any) => {
+          const path: number[] = [sourceIndex];
+          let curr = sourceIndex;
+          const maxSteps = successor.length;
+          let step = 0;
+          const targetIdx = route.target;
+
+          if (successor[curr] !== undefined && successor[curr][targetIdx] !== null && successor[curr][targetIdx] !== undefined) {
+            while (curr !== targetIdx && step < maxSteps) {
+              const next = successor[curr][targetIdx];
+              if (next === null || next === undefined || next === curr) {
+                break;
+              }
+              curr = next;
+              path.push(curr);
+              step++;
+            }
+          }
+
+          if (path[path.length - 1] !== targetIdx) {
+            path.push(targetIdx);
+          }
+
+          return {
+            ...route,
+            path: path
+          };
+        });
+      }
+
+      setMatrixResult(data);
     } catch (err) {
       console.error('Failed to fetch matrix visualization data', err);
       setMatrixResult(null);
@@ -1050,7 +1194,14 @@ export function MapPage() {
   // Reset source in bounds when subBlocks or irrigationPoints change
   useEffect(() => {
     if (subBlocks.length > 0 || irrigationPoints.length > 0) {
-      setSourceIndex(0);
+      const defaultSourceIdx = (() => {
+        const irrSourceIdx = irrigationPoints.findIndex(ip => ip.pointType === 'source');
+        if (irrSourceIdx !== -1) {
+          return subBlocks.length + irrSourceIdx;
+        }
+        return 0;
+      })();
+      setSourceIndex(defaultSourceIdx);
     }
   }, [subBlocks, irrigationPoints]);
 
@@ -1083,7 +1234,7 @@ export function MapPage() {
           name: ip.name || (ip.pointType === 'source' ? 'SUMBER' : 'BUANG'),
           pointType: ip.pointType,
           coordinatePoint: ip.coordinatePoint,
-          elevationM: ip.elevationM,
+          elevationM: ip.callibratedElevation !== null && ip.callibratedElevation !== undefined ? String(ip.callibratedElevation) : ip.elevationM,
           isIrrigationPoint: true,
           areaM2: 0.0001,
         }))
@@ -1205,10 +1356,10 @@ export function MapPage() {
       // Fetch the matrix visualization result
       await fetchMatrixResult();
       
-      alert('Floyd-Warshall routing run successfully and result saved to database!');
+      await dialog.alert('Floyd-Warshall routing run successfully and result saved to database!');
     } catch (err) {
       console.error('Failed to run Floyd-Warshall routing', err);
-      alert('Gagal menjalankan Floyd-Warshall routing: ' + (err instanceof Error ? err.message : String(err)));
+      await dialog.alert('Gagal menjalankan kalkulasi rute irigasi: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setRunningFloydWarshall(false);
     }
@@ -1217,6 +1368,127 @@ export function MapPage() {
   const vectorSource = useRef(new VectorSource());
   const imageLayer = useRef(new ImageLayer());
   const osmLayer = useRef(new TileLayer({ source: new OSM() }));
+
+  const routingSource = useRef(new VectorSource());
+  const featuresLayer = useRef<any>(null);
+  const routingLayer = useRef<any>(null);
+
+  const [showMapLayer, setShowMapLayer] = useState(true);
+  const [showFeaturesLayer, setShowFeaturesLayer] = useState(true);
+  const [showRoutingLayer, setShowRoutingLayer] = useState(true);
+
+  // Toggle layer visibilities
+  useEffect(() => {
+    const field = fields.find(f => f.id === selectedFieldId);
+    const hasWebOdm = !!(field && field.mapVisualUrl);
+
+    if (showMapLayer) {
+      if (hasWebOdm) {
+        imageLayer.current.setVisible(true);
+        osmLayer.current.setVisible(false); // Hide paper map when WebODM map is present
+      } else {
+        imageLayer.current.setVisible(false);
+        osmLayer.current.setVisible(true);
+      }
+    } else {
+      imageLayer.current.setVisible(false);
+      osmLayer.current.setVisible(false);
+    }
+  }, [showMapLayer, selectedFieldId, fields]);
+
+  useEffect(() => {
+    if (featuresLayer.current) {
+      featuresLayer.current.setVisible(showFeaturesLayer);
+    }
+  }, [showFeaturesLayer]);
+
+  useEffect(() => {
+    if (routingLayer.current) {
+      routingLayer.current.setVisible(showRoutingLayer);
+    }
+  }, [showRoutingLayer]);
+
+  // Dash offset animation tick for routing flow
+  const animOffsetRef = useRef(0);
+  useEffect(() => {
+    let animId: number;
+    const tick = () => {
+      animOffsetRef.current = (animOffsetRef.current - 0.2) % 16;
+      if (routingLayer.current) {
+        routingLayer.current.changed();
+      }
+      animId = requestAnimationFrame(tick);
+    };
+    animId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animId);
+  }, []);
+
+  // Draw Floyd-Warshall routing lines on the map
+  useEffect(() => {
+    routingSource.current.clear();
+    if (!matrixResult || !Array.isArray(matrixResult.routes) || matrixResult.routes.length === 0) {
+      return;
+    }
+
+    const allNodes = [
+      ...subBlocks,
+      ...irrigationPoints.map(ip => ({
+        id: ip.id,
+        name: ip.name || (ip.pointType === 'source' ? 'SUMBER' : 'BUANG'),
+        pointType: ip.pointType,
+        coordinatePoint: ip.coordinatePoint,
+        polygonGeom: null as string | null,
+        centroid: getNodeCentroidWkt(ip),
+        isIrrigationPoint: true,
+      }))
+    ];
+
+    const weights = matrixResult.routes.map((r: any) => r.weight);
+    const maxRouteWeight = Math.max(...weights);
+    const minRouteWeight = Math.min(...weights);
+    const range = maxRouteWeight - minRouteWeight;
+
+    const features: any[] = [];
+
+    matrixResult.routes.forEach((route: any) => {
+      const pathIndices = route.path;
+      if (!pathIndices || pathIndices.length < 2) return;
+
+      const coords: number[][] = [];
+      pathIndices.forEach((idx: number) => {
+        const node = allNodes[idx];
+        if (node) {
+          const pt = getNodeLonLat(node);
+          if (pt) {
+            coords.push(fromLonLat(pt));
+          }
+        }
+      });
+
+      if (coords.length >= 2) {
+        const ratio = range > 0 ? (route.weight - minRouteWeight) / range : 0;
+        
+        let color = '#10b981'; // Green
+        if (ratio >= 0.33 && ratio < 0.66) {
+          color = '#f59e0b'; // Amber
+        } else if (ratio >= 0.66) {
+          color = '#f43f5e'; // Rose
+        }
+
+        const lineGeom = new LineString(coords);
+        const feature = new Feature({
+          geometry: lineGeom,
+          weight: route.weight,
+          color: color,
+        });
+        features.push(feature);
+      }
+    });
+
+    if (features.length > 0) {
+      routingSource.current.addFeatures(features);
+    }
+  }, [matrixResult, subBlocks, irrigationPoints]);
 
   // Fetch Field-wide history
   useEffect(() => {
@@ -1273,145 +1545,113 @@ export function MapPage() {
   useEffect(() => {
     if (!mapRef.current) return;
 
+    featuresLayer.current = new VectorLayer({
+      source: vectorSource.current,
+      style: (feature) => {
+        const isIrrPoint = feature.get('isIrrigationPoint');
+        if (isIrrPoint) {
+          const pointType = feature.get('pointType');
+          const color = pointType === 'source' ? '#22c55e' : '#ef4444';
+          const textColor = pointType === 'source' ? '#15803d' : '#b91c1c';
+          return new Style({
+            image: new CircleStyle({
+              radius: 8,
+              fill: new Fill({ color }),
+              stroke: new Stroke({ color: '#fff', width: 2 })
+            }),
+            text: new Text({
+              text: feature.get('name'),
+              font: 'bold 10px Inter, sans-serif',
+              offsetY: -14,
+              fill: new Fill({ color: textColor }),
+              stroke: new Stroke({ color: '#fff', width: 2 })
+            })
+          });
+        }
+
+        const isDevice = feature.get('isDevice');
+        if (isDevice) {
+          return new Style({
+            image: new CircleStyle({
+              radius: 6,
+              fill: new Fill({ color: '#3b82f6' }),
+              stroke: new Stroke({ color: '#fff', width: 2 })
+            }),
+            text: new Text({
+              text: feature.get('deviceCode') || 'Device',
+              font: 'bold 10px Inter, sans-serif',
+              offsetY: -12,
+              fill: new Fill({ color: '#1d4ed8' }),
+              stroke: new Stroke({ color: '#fff', width: 2 })
+            })
+          });
+        }
+
+        const isEmbankment = feature.get('isEmbankment');
+        if (isEmbankment) {
+          return new Style({
+            stroke: new Stroke({
+              color: '#9333ea',
+              width: 2.5,
+            }),
+            fill: new Fill({
+              color: 'rgba(147, 51, 234, 0.2)',
+            }),
+            text: new Text({
+              text: feature.get('name'),
+              font: 'bold 11px Inter, sans-serif',
+              fill: new Fill({ color: '#6b21a8' }),
+              stroke: new Stroke({ color: '#fff', width: 2 }),
+            }),
+          });
+        }
+
+        return new Style({
+          stroke: new Stroke({
+            color: '#16a34a',
+            width: 2,
+          }),
+          fill: new Fill({
+            color: 'rgba(34, 197, 94, 0.2)',
+          }),
+          text: new Text({
+            text: feature.get('name'),
+            font: 'bold 12px Inter, sans-serif',
+            fill: new Fill({ color: '#166534' }),
+            stroke: new Stroke({ color: '#fff', width: 2 }),
+          }),
+        });
+      },
+    });
+
+    routingLayer.current = new VectorLayer({
+      source: routingSource.current,
+      style: (feature) => {
+        const color = feature.get('color') || '#2563eb';
+        return new Style({
+          stroke: new Stroke({
+            color: color,
+            width: 4.5,
+            lineDash: [6, 8],
+            lineDashOffset: animOffsetRef.current,
+          }),
+        });
+      },
+    });
+
+    // Apply visibility states
+    osmLayer.current.setVisible(showMapLayer);
+    imageLayer.current.setVisible(showMapLayer);
+    featuresLayer.current.setVisible(showFeaturesLayer);
+    routingLayer.current.setVisible(showRoutingLayer);
+
     const initialMap = new Map({
       target: mapRef.current,
       layers: [
         osmLayer.current,
         imageLayer.current,
-        new VectorLayer({
-          source: vectorSource.current,
-          style: (feature) => {
-            const isIrrPoint = feature.get('isIrrigationPoint');
-            if (isIrrPoint) {
-              const pointType = feature.get('pointType');
-              const color = pointType === 'source' ? '#22c55e' : '#ef4444';
-              const textColor = pointType === 'source' ? '#15803d' : '#b91c1c';
-              return new Style({
-                image: new CircleStyle({
-                  radius: 8,
-                  fill: new Fill({ color }),
-                  stroke: new Stroke({ color: '#fff', width: 2 })
-                }),
-                text: new Text({
-                  text: feature.get('name'),
-                  font: 'bold 10px Inter, sans-serif',
-                  offsetY: -14,
-                  fill: new Fill({ color: textColor }),
-                  stroke: new Stroke({ color: '#fff', width: 2 })
-                })
-              });
-            }
-
-            const isDevice = feature.get('isDevice');
-            if (isDevice) {
-              return new Style({
-                image: new CircleStyle({
-                  radius: 6,
-                  fill: new Fill({ color: '#3b82f6' }),
-                  stroke: new Stroke({ color: '#fff', width: 2 })
-                }),
-                text: new Text({
-                  text: feature.get('deviceCode') || 'Device',
-                  font: 'bold 10px Inter, sans-serif',
-                  offsetY: -12,
-                  fill: new Fill({ color: '#1d4ed8' }),
-                  stroke: new Stroke({ color: '#fff', width: 2 })
-                })
-              });
-            }
-
-            const isEmbankment = feature.get('isEmbankment');
-            if (isEmbankment) {
-              return new Style({
-                stroke: new Stroke({
-                  color: '#9333ea',
-                  width: 2.5,
-                }),
-                fill: new Fill({
-                  color: 'rgba(147, 51, 234, 0.2)',
-                }),
-                text: new Text({
-                  text: feature.get('name'),
-                  font: 'bold 11px Inter, sans-serif',
-                  fill: new Fill({ color: '#6b21a8' }),
-                  stroke: new Stroke({ color: '#fff', width: 2 }),
-                }),
-              });
-            }
-
-            const sbId = feature.get('id');
-            const telem = subBlockTelemetryMapRef.current[sbId];
-            let color = 'rgba(34, 197, 94, 0.25)'; // Default green
-            let strokeColor = '#16a34a';
-            let textColor = '#166534';
-
-            if (telem) {
-              const tab = activeTabRef.current;
-              if (tab === 'water' && telem.waterLevelCm !== null && telem.waterLevelCm !== undefined) {
-                const wl = parseFloat(telem.waterLevelCm);
-                if (wl > 5) {
-                  color = 'rgba(59, 130, 246, 0.45)'; // Biru (Tergenang)
-                  strokeColor = '#2563eb';
-                  textColor = '#1e40af';
-                } else if (wl >= -5) {
-                  color = 'rgba(34, 197, 94, 0.45)'; // Hijau (Optimal AWD)
-                  strokeColor = '#16a34a';
-                  textColor = '#166534';
-                } else if (wl >= -15) {
-                  color = 'rgba(245, 158, 11, 0.45)'; // Kuning (Warning Kering)
-                  strokeColor = '#d97706';
-                  textColor = '#92400e';
-                } else {
-                  color = 'rgba(239, 68, 68, 0.5)'; // Merah (Kritis)
-                  strokeColor = '#dc2626';
-                  textColor = '#991b1b';
-                }
-              } else if (tab === 'temp' && (telem.temperatureC !== null || telem.tempC !== null)) {
-                const tc = parseFloat(telem.temperatureC ?? telem.tempC ?? 28);
-                if (tc > 32) {
-                  color = 'rgba(239, 68, 68, 0.45)'; // Panas
-                  strokeColor = '#dc2626';
-                  textColor = '#991b1b';
-                } else if (tc > 28) {
-                  color = 'rgba(245, 158, 11, 0.45)'; // Normal Hangat
-                  strokeColor = '#d97706';
-                  textColor = '#92400e';
-                } else {
-                  color = 'rgba(59, 130, 246, 0.45)'; // Sejuk
-                  strokeColor = '#2563eb';
-                  textColor = '#1e40af';
-                }
-              } else if (tab === 'humidity' && (telem.humidityPct !== null || telem.humidity !== null)) {
-                const hm = parseFloat(telem.humidityPct ?? telem.humidity ?? 70);
-                if (hm < 60) {
-                  color = 'rgba(245, 158, 11, 0.45)'; // Kering
-                  strokeColor = '#d97706';
-                  textColor = '#92400e';
-                } else {
-                  color = 'rgba(16, 185, 129, 0.45)'; // Lembab
-                  strokeColor = '#059669';
-                  textColor = '#065f46';
-                }
-              }
-            }
-
-            return new Style({
-              stroke: new Stroke({
-                color: strokeColor,
-                width: 2.5,
-              }),
-              fill: new Fill({
-                color,
-              }),
-              text: new Text({
-                text: feature.get('name'),
-                font: 'bold 12px Inter, sans-serif',
-                fill: new Fill({ color: textColor }),
-                stroke: new Stroke({ color: '#fff', width: 2.5 }),
-              }),
-            });
-          },
-        }),
+        featuresLayer.current,
+        routingLayer.current,
       ],
       view: new View({
         center: fromLonLat([106.8456, -6.2088]), // Default center (Jakarta area approx)
@@ -1441,11 +1681,43 @@ export function MapPage() {
     fetchFields();
   }, []);
 
-  // Fetch and save map visual headers to localStorage when mapVisualUrl changes
+  // Restore and sync map georeference headers from DB to localStorage
   useEffect(() => {
     const field = fields.find(f => f.id === selectedFieldId);
-    if (!field || !field.mapVisualUrl) return;
+    if (!field) return;
 
+    if (field.mapHeaders) {
+      console.log("[MonitoringMap] Restoring map headers from DB to localStorage for field:", field.name, field.mapHeaders);
+      const headers = field.mapHeaders;
+      localStorage.setItem(`map_headers_${field.name}`, JSON.stringify(headers));
+      localStorage.setItem(field.name, JSON.stringify(headers));
+      
+      const targetHeaders = [
+        'x-bounds',
+        'x-crs',
+        'x-height',
+        'x-original-height',
+        'x-original-width',
+        'x-transform',
+        'x-width',
+        'max-resolution',
+        'max_resolution',
+        'x-max-resolution'
+      ];
+      targetHeaders.forEach(header => {
+        if (headers[header] !== undefined && headers[header] !== null) {
+          localStorage.setItem(`${field.name}_${header}`, String(headers[header]));
+        }
+      });
+    }
+
+    if (!field.mapVisualUrl) return;
+
+    // If already has mapHeaders, no need to fetch visual headers again
+    if (field.mapHeaders && Object.keys(field.mapHeaders).length > 1) {
+      return;
+    }
+    
     const getHeaderValue = (headers: any, targetKey: string) => {
       if (!headers) return undefined;
       if (typeof headers.get === 'function') {
@@ -1461,7 +1733,7 @@ export function MapPage() {
       return undefined;
     };
 
-    const saveHeaders = (headers: any, fieldName: string) => {
+    const saveHeaders = async (headers: any, fieldName: string) => {
       if (!headers) {
         console.warn("[MonitoringMap] No headers provided to saveHeaders");
         return;
@@ -1474,7 +1746,10 @@ export function MapPage() {
         'x-original-height',
         'x-original-width',
         'x-transform',
-        'x-width'
+        'x-width',
+        'max-resolution',
+        'max_resolution',
+        'x-max-resolution'
       ];
       
       const savedData: Record<string, string> = { fieldName };
@@ -1489,9 +1764,18 @@ export function MapPage() {
       });
       
       if (Object.keys(savedData).length > 1) {
-        console.log("[MonitoringMap] Saving map headers to localStorage for field:", fieldName, savedData);
+        console.log("[MonitoringMap] Saving map headers to localStorage and DB for field:", fieldName, savedData);
         localStorage.setItem(`map_headers_${fieldName}`, JSON.stringify(savedData));
         localStorage.setItem(fieldName, JSON.stringify(savedData));
+        
+        try {
+          await apiClient.patch(`/fields/${selectedFieldId}`, { map_headers: savedData });
+          console.log("[MonitoringMap] Map headers successfully saved to database");
+          // Update the field object in local state so we don't refetch
+          setFields(prev => prev.map(f => f.id === selectedFieldId ? { ...f, mapHeaders: savedData } : f));
+        } catch (err) {
+          console.error("[MonitoringMap] Failed to save map headers to database", err);
+        }
       } else {
         console.warn("[MonitoringMap] No target headers found in response headers. Not saving to localStorage.");
       }
@@ -1509,7 +1793,7 @@ export function MapPage() {
     };
 
     fetchHeaders(field.mapVisualUrl, field.name);
-  }, [selectedFieldId, fields, refreshKey]);
+  }, [selectedFieldId, refreshKey]);
 
   // Fetch rule profiles (global, fetched once)
   useEffect(() => {
@@ -1948,34 +2232,40 @@ export function MapPage() {
           className="w-full h-full"
         />
 
-        {/* Interactive Telemetry Heatmap Legend */}
-        <div className="absolute bottom-4 left-4 z-20 bg-background/85 backdrop-blur-md border border-white/20 rounded-xl p-3 shadow-2xl max-w-xs transition-all duration-300">
-          <div className="text-xs font-bold text-foreground mb-2 flex items-center gap-1.5 border-b pb-1.5">
-            <Layers className="w-3.5 h-3.5 text-primary animate-pulse" />
-            <span>Legenda Heatmap ({activeTab === 'water' ? 'Tinggi Air' : activeTab === 'temp' ? 'Suhu' : 'Kelembaban'})</span>
+        {/* Layer Control Panel */}
+        <div className="absolute top-16 left-4 z-20 flex flex-col gap-2 bg-background/95 backdrop-blur-md border rounded-xl p-3 shadow-xl w-52 transition-all duration-300">
+          <div className="flex items-center gap-2 border-b pb-2">
+            <Layers className="h-4 w-4 text-primary" />
+            <span className="text-xs font-bold text-foreground uppercase tracking-wider">Lapisan Peta (Layers)</span>
           </div>
-          <div className="flex flex-col gap-1.5 text-[11px] font-medium">
-            {activeTab === 'water' && (
-              <>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-blue-500/80 border border-blue-600 shadow-sm" /><span>Tergenang / Full (&gt; +5 cm)</span></div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-green-500/80 border border-green-600 shadow-sm" /><span>Optimal AWD (-5 s.d. +5 cm)</span></div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-amber-500/80 border border-amber-600 shadow-sm" /><span>Peringatan Kering (-15 s.d. -5 cm)</span></div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-red-500/80 border border-red-600 shadow-sm" /><span>Kering Kritis (&lt; -15 cm)</span></div>
-              </>
-            )}
-            {activeTab === 'temp' && (
-              <>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-blue-500/80 border border-blue-600 shadow-sm" /><span>Sejuk (&lt; 28°C)</span></div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-amber-500/80 border border-amber-600 shadow-sm" /><span>Normal Hangat (28 s.d. 32°C)</span></div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-red-500/80 border border-red-600 shadow-sm" /><span>Panas (&gt; 32°C)</span></div>
-              </>
-            )}
-            {activeTab === 'humidity' && (
-              <>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-amber-500/80 border border-amber-600 shadow-sm" /><span>Kering (&lt; 60%)</span></div>
-                <div className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-emerald-500/80 border border-emerald-600 shadow-sm" /><span>Lembab (&gt; 60%)</span></div>
-              </>
-            )}
+          <div className="space-y-2 pt-1">
+            <label className="flex items-center gap-2.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors py-1 px-1.5 rounded-md hover:bg-muted/50">
+              <input 
+                type="checkbox" 
+                checked={showMapLayer} 
+                onChange={(e) => setShowMapLayer(e.target.checked)}
+                className="rounded border-input text-primary focus:ring-primary h-4 w-4"
+              />
+              <span className="font-medium">Peta Dasar (Map)</span>
+            </label>
+            <label className="flex items-center gap-2.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors py-1 px-1.5 rounded-md hover:bg-muted/50">
+              <input 
+                type="checkbox" 
+                checked={showFeaturesLayer} 
+                onChange={(e) => setShowFeaturesLayer(e.target.checked)}
+                className="rounded border-input text-primary focus:ring-primary h-4 w-4"
+              />
+              <span className="font-medium">Petak & IoT (Features)</span>
+            </label>
+            <label className="flex items-center gap-2.5 cursor-pointer text-xs text-muted-foreground hover:text-foreground transition-colors py-1 px-1.5 rounded-md hover:bg-muted/50">
+              <input 
+                type="checkbox" 
+                checked={showRoutingLayer} 
+                onChange={(e) => setShowRoutingLayer(e.target.checked)}
+                className="rounded border-input text-primary focus:ring-primary h-4 w-4"
+              />
+              <span className="font-medium">Rute Floyd-Warshall</span>
+            </label>
           </div>
         </div>
 
@@ -2002,12 +2292,13 @@ export function MapPage() {
                   variant="outline" 
                   className="w-full text-xs"
                   onClick={async () => {
-                    if (confirm('Laporkan pematang untuk kotak ini telah diperbaiki?')) {
+                    const confirmed = await dialog.confirm('Laporkan pematang untuk kotak ini telah diperbaiki?');
+                    if (confirmed) {
                       try {
                         await apiClient.post(`/sub-blocks/${selectedSubBlock.id}/resolve-embankment`);
-                        alert('Status darurat dicabut');
+                        await dialog.alert('Status darurat dicabut');
                       } catch (e) {
-                        alert('Gagal mencabut status darurat');
+                        await dialog.alert('Gagal mencabut status darurat');
                       }
                     }
                   }}
@@ -2765,10 +3056,6 @@ export function MapPage() {
             {resolvedRuleProfile && (
               <div className="flex flex-wrap gap-3 items-center sm:border-l sm:pl-4">
                 <div className="text-center">
-                  <p className="text-[10px] uppercase font-semibold text-muted-foreground">Batas Bawah AWD</p>
-                  <p className="text-sm font-bold text-red-500">{resolvedRuleProfile.awdLowerThresholdCm} cm</p>
-                </div>
-                <div className="text-center">
                   <p className="text-[10px] uppercase font-semibold text-muted-foreground">Target Genangan</p>
                   <p className="text-sm font-bold text-blue-500">{resolvedRuleProfile.awdUpperTargetCm} cm</p>
                 </div>
@@ -2838,9 +3125,9 @@ export function MapPage() {
                           {(() => {
                             if (sb.elevationCalibration !== null && sb.elevationCalibration !== undefined) {
                               const cal = parseFloat(sb.elevationCalibration.toString());
-                              return `${cal.toFixed(2)} m`;
+                              return `${cal.toFixed(2)} mdpl`;
                             }
-                            return sb.elevationM ? `${parseFloat(sb.elevationM).toFixed(2)} m` : '—';
+                            return sb.elevationM ? `${parseFloat(sb.elevationM).toFixed(2)} m relatif` : '—';
                           })()}
                         </span>
                       </div>
@@ -2909,7 +3196,14 @@ export function MapPage() {
                       <div className="space-y-1.5 text-xs text-muted-foreground">
                         <div className="flex justify-between">
                           <span>Elevasi</span>
-                          <span className="font-semibold text-foreground">{ip.elevationM ? `${ip.elevationM} m` : '—'}</span>
+                          <span className="font-semibold text-foreground">
+                            {(() => {
+                              const elev = ip.callibratedElevation !== null && ip.callibratedElevation !== undefined
+                                ? ip.callibratedElevation
+                                : ip.elevationM;
+                              return elev ? `${elev} mdpl` : '—';
+                            })()}
+                          </span>
                         </div>
                         <div className="flex flex-col gap-1">
                           <span>Terhubung ke Sub-blok:</span>
@@ -2998,7 +3292,7 @@ export function MapPage() {
                 ) : (
                   <>
                     <Activity className="h-3.5 w-3.5" />
-                    Jalankan Floyd-Warshall
+                    Kalkulasi Rute Irigasi
                   </>
                 )}
               </Button>
