@@ -170,16 +170,10 @@ export async function runDecisionCycleForField(
     const cycleMap = new Map(cycles.map(c => [c.subBlockId, c]));
 
     // 6. Load rule profiles (merge: crop-cycle specific → default)
-    const ruleIds = [...new Set(cycles.map(c => c.ruleProfileId).filter(Boolean))] as string[];
+    const allActiveRules = await db.select().from(ruleProfilesTable)
+      .where(eq(ruleProfilesTable.isActive, true));
     const ruleMap = new Map<string, typeof ruleProfilesTable.$inferSelect>();
-    if (ruleIds.length > 0) {
-      const rules = await db.select().from(ruleProfilesTable)
-        .where(and(
-          sql`${ruleProfilesTable.id} = ANY(${ruleIds})`,
-          eq(ruleProfilesTable.isActive, true),
-        ));
-      rules.forEach(r => ruleMap.set(r.id, r));
-    }
+    allActiveRules.forEach(r => ruleMap.set(r.id, r));
 
     // 7. Load management flags (active now)
     const flagRows = await db.select().from(managementEventsTable)
@@ -236,7 +230,13 @@ export async function runDecisionCycleForField(
     const subBlocksPayload: SubBlockInputPayload[] = subBlocks.map(sb => {
       const state = stateMap.get(sb.id);
       const cycle = cycleMap.get(sb.id);
-      const rule = cycle?.ruleProfileId ? ruleMap.get(cycle.ruleProfileId) : null;
+      let rule = cycle?.ruleProfileId ? (ruleMap.get(cycle.ruleProfileId) ?? null) : null;
+      if (!rule && cycle) {
+        rule = allActiveRules.find(r => r.bucketCode === cycle.bucketCode && r.phaseCode === cycle.currentPhaseCode && r.isDefault)
+            || allActiveRules.find(r => r.bucketCode === cycle.bucketCode && r.phaseCode === cycle.currentPhaseCode)
+            || allActiveRules.find(r => r.isDefault)
+            || null;
+      }
       const flags = flagMap.get(sb.id) ?? [];
       const sbFlows = allFlowPaths.filter(fp => fp.fromSubBlockId === sb.id || fp.toSubBlockId === sb.id);
 

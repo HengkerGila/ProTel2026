@@ -7,8 +7,9 @@ from app.modules.decision_engine.schemas import (
     DssAction,
 )
 from app.modules.decision_engine.scorer import score_and_rank
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone, timedelta
+
+WIB = timezone(timedelta(hours=7))
 
 # ---------------------------------------------------------------------------
 # Konfigurasi Agronomi & Operasional
@@ -185,8 +186,7 @@ def _evaluate_sub_block(
 
         # 5. Normal
         else:
-            tz = ZoneInfo("Asia/Jakarta")
-            now_hour = datetime.now(tz).hour
+            now_hour = datetime.now(WIB).hour
             is_afternoon = 13 <= now_hour < 17
 
             if is_afternoon and is_heavy:
@@ -209,8 +209,7 @@ def _evaluate_sub_block(
     # ── 5. Evaluasi level air vs threshold ──────────────────────────────────
 
     # Cek jam operasional malam (WIB)
-    tz = ZoneInfo("Asia/Jakarta")
-    now_hour = datetime.now(tz).hour
+    now_hour = datetime.now(WIB).hour
     is_night = now_hour >= NIGHT_BLOCK_START_HOUR or now_hour < NIGHT_BLOCK_END_HOUR
 
     # Level kritis — drought alert (Abaikan jam malam karena darurat)
