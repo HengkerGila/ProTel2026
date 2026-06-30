@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { X, Loader2 } from 'lucide-react';
+import { X, Loader2, Cpu } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { apiClient } from '@/api/client';
+import { apiClient, gisProcClient } from '@/api/client';
 import { Map, Check, Layers } from 'lucide-react';
 import { SubBlockMapEditor } from '@/components/mapping/SubBlockMapEditor';
 import { useEffect } from 'react';
@@ -22,6 +22,161 @@ interface CreateSubBlockModalProps {
   onSuccess: () => void;
 }
 
+async function fetchGeoreferencePoints(fieldData: any): Promise<any[]> {
+  if (!fieldData || !fieldData.name) return [];
+  const fieldName = fieldData.name;
+  
+  // 1. Try to read from localStorage
+  let georeferenceStr = localStorage.getItem(`${fieldName}_georeference`);
+  if (georeferenceStr) {
+    try {
+      const parsed = JSON.parse(georeferenceStr);
+      if (Array.isArray(parsed.points)) return parsed.points;
+    } catch (e) {}
+  }
+  
+  // 2. Fallback to localStorage keys for georeference metadata
+  const geoDataStr = localStorage.getItem(fieldName) || localStorage.getItem(`map_headers_${fieldName}`);
+  if (!geoDataStr) {
+    console.warn(`[MapElevation] No georeferencing metadata found in localStorage for: ${fieldName}`);
+    return [];
+  }
+  
+  try {
+    const geoData = JSON.parse(geoDataStr);
+    const x_crs = geoData['x_crs'] || geoData['x-crs'] || '';
+    const x_bounds = geoData['x_bounds'] || geoData['x-bounds'] || '';
+    const x_transform = geoData['x_transform'] || geoData['x-transform'] || '';
+    const max_resolution = geoData['max_resolution'] || geoData['max-resolution'] || '';
+    
+    let projectId = '';
+    const mapUrl = fieldData.mapVisualUrl;
+    if (mapUrl) {
+      const match = mapUrl.match(/[?&]project_name=([^&]+)/);
+      if (match) {
+        projectId = decodeURIComponent(match[1]);
+      }
+    }
+    
+    if (!projectId) {
+      const userStr = localStorage.getItem('user');
+      if (userStr) {
+        const user = JSON.parse(userStr);
+        projectId = user.id;
+      }
+    }
+    
+    if (!projectId) {
+      const authRes = await apiClient.get('/auth/me');
+      projectId = authRes.data?.data?.id;
+    }
+    
+    if (!projectId) return [];
+    
+    const res = await gisProcClient.get(`/webodm/projects/${projectId}/tasks/${fieldName}/dtm`, {
+      params: {
+        max_resolution,
+        x_crs,
+        x_bounds,
+        x_transform
+      }
+    });
+    
+    if (res.data && Array.isArray(res.data.points)) {
+      localStorage.setItem(`${fieldName}_georeference`, JSON.stringify(res.data));
+      return res.data.points;
+    }
+  } catch (err) {
+    console.error(`[MapElevation] Failed to fetch georeference DTM for ${fieldName}:`, err);
+  }
+  
+  return [];
+}
+
+async function calculateAverageElevation(polygonGeom: any, fieldData: any): Promise<number | null> {
+  console.log("[MapElevation] calculateAverageElevation starting for fieldData:", fieldData?.name);
+  try {
+    if (!polygonGeom || !fieldData) {
+      return null;
+    }
+    
+    // Parse polygonGeom if it's a string
+    const geom = typeof polygonGeom === 'string' ? JSON.parse(polygonGeom) : polygonGeom;
+    if (!geom || geom.type !== 'Polygon' || !geom.coordinates || !geom.coordinates[0]) {
+      return null;
+    }
+    
+    const coordinates = geom.coordinates[0] as [number, number][];
+    const points = await fetchGeoreferencePoints(fieldData);
+    
+    if (points.length === 0) {
+      return null;
+    }
+    
+    // 1. Calculate centroid of the polygon coordinates (geographic lon/lat)
+    let sumLon = 0;
+    let sumLat = 0;
+    coordinates.forEach(([lon, lat]) => {
+      sumLon += lon;
+      sumLat += lat;
+    });
+    const cx = sumLon / coordinates.length;
+    const cy = sumLat / coordinates.length;
+    
+    // 2. Convert geographic centroid [cx, cy] to pixel coordinates [qx, qy]
+    const bounds = fieldData.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
+    const lon_min = bounds[0][1];
+    const lon_max = bounds[1][1];
+    const lat_max = bounds[0][0];
+    const lat_min = bounds[1][0];
+    
+    const fieldHeaderStr = localStorage.getItem(fieldData.name) || localStorage.getItem(`map_headers_${fieldData.name}`);
+    let imageWidth = 1000;
+    let imageHeight = 1000;
+    if (fieldHeaderStr) {
+      try {
+        const headerData = JSON.parse(fieldHeaderStr);
+        imageWidth = parseFloat(headerData['x-width'] || headerData['x_width']) || 1000;
+        imageHeight = parseFloat(headerData['x-height'] || headerData['x_height']) || 1000;
+      } catch (e) {}
+    }
+    
+    // Convert to pixel space
+    const qx = ((cx - lon_min) / (lon_max - lon_min)) * imageWidth;
+    const qy = ((cy - lat_min) / (lat_max - lat_min)) * imageHeight;
+    
+    console.log(`[MapElevation] Matching subblock centroid in pixel space: px=${qx}, py=${qy}`);
+    
+    let closestPoint: any = null;
+    let minDistance = Infinity;
+
+    points.forEach((p: any) => {
+      const px = parseFloat(p.x);
+      const py = parseFloat(p.y);
+      
+      if (!isNaN(px) && !isNaN(py) && typeof p.elevation === 'number') {
+        const dist = Math.sqrt((px - qx) ** 2 + (py - qy) ** 2);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestPoint = p;
+        }
+      }
+    });
+    
+    if (closestPoint) {
+      console.log(`[MapElevation] Closest point found elevation: ${closestPoint.elevation}`);
+      return closestPoint.elevation;
+    } else {
+      console.warn("[MapElevation] No closest point found");
+    }
+  } catch (error) {
+    console.error("[MapElevation] Failed to calculate average elevation:", error);
+  }
+  return null;
+}
+
+
+
 export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onSuccess }: CreateSubBlockModalProps) {
   const [formData, setFormData] = useState<SubBlockFormData>({
     name: initialData?.name || '',
@@ -35,12 +190,46 @@ export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onS
   const [isMapEditorOpen, setIsMapEditorOpen] = useState(false);
   const [polygonGeom, setPolygonGeom] = useState<any>(initialData?.polygonGeom || null);
   const [fieldData, setFieldData] = useState<any>(null);
+  const [allDevices, setAllDevices] = useState<any[]>([]);
+  const [allSubBlocks, setAllSubBlocks] = useState<any[]>([]);
+  const [allEmbankments, setAllEmbankments] = useState<any[]>([]);
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([]);
+  const [pendingDeviceCoords, setPendingDeviceCoords] = useState<Record<string, { x: number; y: number }>>({});
 
   useEffect(() => {
     if (isOpen && fieldId) {
       apiClient.get(`/fields/${fieldId}`).then(res => setFieldData(res.data.data));
+      
+      // Fetch all devices in field
+      apiClient.get(`/fields/${fieldId}/devices`)
+        .then(res => setAllDevices(res.data.data))
+        .catch(err => console.error("Failed to load devices", err));
+
+      // Fetch all sub-blocks in field
+      apiClient.get(`/fields/${fieldId}/sub-blocks`)
+        .then(res => setAllSubBlocks(res.data.data))
+        .catch(err => console.error("Failed to load sub-blocks", err));
+
+      // Fetch all embankments in field
+      apiClient.get(`/fields/${fieldId}/embankments`)
+        .then(res => setAllEmbankments(res.data.data))
+        .catch(err => console.error("Failed to load embankments", err));
     }
   }, [isOpen, fieldId]);
+
+  useEffect(() => {
+    if (initialData?.devices) {
+      setSelectedDeviceIds(initialData.devices.map((d: any) => d.id));
+    } else {
+      setSelectedDeviceIds([]);
+    }
+  }, [initialData]);
+
+  const getSubBlockName = (sbId: string | null) => {
+    if (!sbId) return null;
+    const sb = allSubBlocks.find(s => s.id === sbId);
+    return sb ? sb.name : 'Petak Lain';
+  };
 
   if (!isOpen) return null;
 
@@ -75,11 +264,44 @@ export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onS
         polygon_geom: parsedGeom
       };
       
+      let subBlockId = initialData?.id;
       if (initialData?.id) {
         await apiClient.patch(`/sub-blocks/${initialData.id}`, payload);
       } else {
-        await apiClient.post(`/fields/${fieldId}/sub-blocks`, payload);
+        const response = await apiClient.post(`/fields/${fieldId}/sub-blocks`, payload);
+        subBlockId = response.data.data.id;
       }
+
+      // Process device assignments
+      const initialDeviceIds = initialData?.devices?.map((d: any) => d.id) || [];
+      const toAssign = selectedDeviceIds.filter((id: string) => !initialDeviceIds.includes(id));
+      const toUnassign = initialDeviceIds.filter((id: string) => !selectedDeviceIds.includes(id));
+      
+      await Promise.all([
+        ...toAssign.map((id: string) => apiClient.post(`/devices/${id}/assign`, { sub_block_id: subBlockId })),
+        ...toUnassign.map((id: string) => apiClient.post(`/devices/${id}/unassign`))
+      ]);
+
+      // Update coordinates for all currently selected devices
+      await Promise.all(
+        selectedDeviceIds.map(async (id: string) => {
+          const coord = pendingDeviceCoords[id];
+          if (coord) {
+            const geojsonPoint = {
+              type: 'Point',
+              coordinates: [coord.x, coord.y]
+            };
+            await apiClient.patch(`/devices/${id}`, { coordinate: geojsonPoint });
+          }
+        })
+      );
+
+      // Clear coordinates for unassigned devices
+      await Promise.all(
+        toUnassign.map(async (id: string) => {
+          await apiClient.patch(`/devices/${id}`, { coordinate: null });
+        })
+      );
       
       onSuccess();
       onClose();
@@ -184,6 +406,63 @@ export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onS
             </p>
           </div>
 
+          <div className="space-y-2 border p-3 rounded-md bg-muted/10">
+            <label className="text-xs font-semibold flex items-center gap-1.5 text-foreground uppercase tracking-wide">
+              <Cpu className="h-3.5 w-3.5 text-primary" /> Alokasi Device / Sensor
+            </label>
+            <p className="text-[10px] text-muted-foreground leading-normal">
+              Pilih satu atau lebih device untuk dialokasikan ke petak ini. Satu device hanya bisa terpasang pada satu petak.
+            </p>
+            {allDevices.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic py-1 text-center bg-background rounded border border-dashed">
+                Tidak ada device tersedia di lahan ini.
+              </p>
+            ) : (
+              <div className="max-h-40 overflow-y-auto space-y-1 border rounded-md p-1.5 bg-background mt-2">
+                {allDevices.map((d) => {
+                  const currentSbId = d.subBlockId || d.sub_block_id;
+                  const isAssignedToOther = currentSbId && currentSbId !== initialData?.id;
+                  const isAssignedHere = currentSbId && currentSbId === initialData?.id;
+                  const isChecked = selectedDeviceIds.includes(d.id);
+                  
+                  return (
+                    <label key={d.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/50 cursor-pointer transition-colors border border-transparent hover:border-muted text-xs">
+                      <input 
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedDeviceIds(prev => [...prev, d.id]);
+                          } else {
+                            setSelectedDeviceIds(prev => prev.filter(id => id !== d.id));
+                          }
+                        }}
+                        className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono font-bold text-foreground truncate">{d.deviceCode}</span>
+                          <span className="capitalize text-[10px] text-muted-foreground font-medium shrink-0">{d.deviceType.replace('_', ' ')}</span>
+                        </div>
+                        <div className="mt-0.5 flex items-center justify-between text-[10px]">
+                          {isAssignedHere ? (
+                            <span className="text-green-600 font-semibold">Terpasang di petak ini</span>
+                          ) : isAssignedToOther ? (
+                            <span className="text-amber-600 font-semibold truncate">
+                              Terpasang di: {getSubBlockName(currentSbId)} {isChecked && " (Akan dipindahkan)"}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">Tersedia</span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           <div className="flex justify-end space-x-2 pt-4 border-t mt-6">
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
               Batal
@@ -199,9 +478,29 @@ export function CreateSubBlockModal({ isOpen, fieldId, initialData, onClose, onS
           <SubBlockMapEditor 
             field={fieldData}
             existingPolygon={polygonGeom}
+            devices={allDevices}
+            selectedDeviceIds={selectedDeviceIds}
+            subBlockId={initialData?.id}
+            existingSubBlocks={allSubBlocks}
+            existingEmbankments={allEmbankments}
             onClose={() => setIsMapEditorOpen(false)}
-            onSave={(geojson) => {
+            onSave={async (geojson, deviceCoords, updatedDeviceIds) => {
+              // Calculate average elevation using the pixel coordinates first
+              const avgElevation = await calculateAverageElevation(geojson, fieldData);
+              if (avgElevation !== null) {
+                setFormData(prev => ({
+                  ...prev,
+                  elevation_m: avgElevation
+                }));
+              }
+              
               setPolygonGeom(geojson);
+              if (deviceCoords) {
+                setPendingDeviceCoords(prev => ({ ...prev, ...deviceCoords }));
+              }
+              if (updatedDeviceIds) {
+                setSelectedDeviceIds(updatedDeviceIds);
+              }
               setIsMapEditorOpen(false);
             }}
           />

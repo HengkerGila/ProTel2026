@@ -7,11 +7,12 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # App
     app_env: str = "development"
-    port: int = 8000
+    port: int = 8002
     log_level: str = "info"
 
     # Database

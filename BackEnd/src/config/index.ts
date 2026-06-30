@@ -38,6 +38,12 @@ const envSchema = z.object({
 
   // GISPROC
   GISPROC_API_BASE_URI: z.preprocess((val) => val === '' ? undefined : val, z.string().url().default('http://localhost:8001')),
+
+  // MQTT
+  MQTT_URL: z.string().url().default('mqtt://localhost:1883'),
+
+  // BMKG
+  BMKG_BASE_URL: z.string().url().default('https://api.bmkg.go.id/publik/prakiraan-cuaca'),
 });
 
 const _parsed = envSchema.safeParse(process.env);

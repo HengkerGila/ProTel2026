@@ -7,6 +7,7 @@ import { apiClient } from '@/api/client';
 import { CreateFieldModal } from './create-field-modal';
 import { EntityDetailModal } from '@/components/entity-detail-modal';
 import { MapVisualManager } from '@/components/mapping/MapVisualManager';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface Field {
   id: string;
@@ -16,12 +17,15 @@ interface Field {
   waterSourceType: string;
   areaHectares: number | null;
   isActive: boolean;
+  isSourceDepleted: boolean;
   mapVisualUrl: string | null;
   mapBounds: number[][] | null;
+  assignedFileName?: string | null;
   createdAt: string;
 }
 
 export function FieldsPage() {
+  const dialog = useDialog();
   const [fields, setFields] = useState<Field[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -49,12 +53,13 @@ export function FieldsPage() {
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus lahan ini?')) return;
+    const confirmed = await dialog.confirm('Apakah Anda yakin ingin menghapus lahan ini?');
+    if (!confirmed) return;
     try {
       await apiClient.delete(`/fields/${id}`);
       fetchFields();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal menghapus lahan');
+      await dialog.alert(err.response?.data?.message || 'Gagal menghapus lahan');
     }
   };
   const filteredFields = fields.filter(f => 
@@ -136,6 +141,7 @@ export function FieldsPage() {
                     <th className="px-6 py-3 font-medium">Luas Area</th>
                     <th className="px-6 py-3 font-medium">Water Source</th>
                     <th className="px-6 py-3 font-medium text-center">Status</th>
+                    <th className="px-6 py-3 font-medium text-center">Sungai / Sumber</th>
                     <th className="px-6 py-3 font-medium text-right">Aksi</th>
                   </tr>
                 </thead>
@@ -158,6 +164,27 @@ export function FieldsPage() {
                           <Badge variant={field.isActive ? "default" : "secondary"}>
                             {field.isActive ? 'Aktif' : 'Non-aktif'}
                           </Badge>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            onClick={async () => {
+                              try {
+                                await apiClient.patch(`/fields/${field.id}/drought-status`, {
+                                  is_source_depleted: !field.isSourceDepleted
+                                });
+                                fetchFields();
+                              } catch (e) {
+                                await dialog.alert('Gagal mengubah status sungai');
+                              }
+                            }}
+                            className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
+                              field.isSourceDepleted 
+                                ? 'bg-red-100 text-red-800 border-red-200 border' 
+                                : 'bg-green-100 text-green-800 border-green-200 border'
+                            }`}
+                          >
+                            {field.isSourceDepleted ? 'Kering / Darurat' : 'Normal / Mengalir'}
+                          </button>
                         </td>
                         <td className="px-6 py-4 text-right flex justify-end gap-2">
                           <Button 
@@ -199,11 +226,13 @@ export function FieldsPage() {
                       </tr>
                       {managingMapFieldId === field.id && (
                         <tr key={`${field.id}-map-row`} className="bg-muted/5 animate-in slide-in-from-top-1 duration-200">
-                          <td colSpan={6} className="px-6 py-4 border-y">
+                          <td colSpan={7} className="px-6 py-4 border-y">
                             <MapVisualManager 
                               fieldId={field.id}
+                              fieldName={field.name}
                               initialVisualUrl={field.mapVisualUrl || undefined}
                               initialBounds={field.mapBounds || undefined}
+                              initialAssignedFileName={field.assignedFileName || undefined}
                               onSuccess={() => {
                                 fetchFields();
                               }}
@@ -237,6 +266,20 @@ export function FieldsPage() {
         onClose={() => setDetailEntity(null)} 
         title="Detail Lahan (Field)"
         data={detailEntity}
+        excludeKeys={[
+          'id', 
+          'operatorCountDefault', 
+          'operator_count_default', 
+          'notes', 
+          'mapVisualUrl', 
+          'map_visual_url', 
+          'mapBounds', 
+          'map_bounds',
+          'irrigationEdges',
+          'irrigation_edges',
+          'irrigationNodes',
+          'irrigation_nodes'
+        ]}
       />
     </div>
   );

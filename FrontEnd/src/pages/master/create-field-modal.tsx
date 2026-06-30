@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Loader2, Video } from 'lucide-react';
+import { X, Loader2, Video, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { apiClient } from '@/api/client';
 import { videoOpsApi } from '@/api/gisProc';
@@ -30,8 +30,16 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [srtFile, setSrtFile] = useState<File | null>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const srtInputRef = useRef<HTMLInputElement>(null);
   const [currentUserId, setCurrentUserId] = useState<string>('');
+
+  // States for direct images upload
+  const [uploadMode, setUploadMode] = useState<'video' | 'images'>('video');
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imageCollectionName, setImageCollectionName] = useState<string>('');
+  const imagesInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     apiClient.get('/auth/me').then((res) => {
@@ -59,7 +67,8 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
     try {
       const payload = {
         ...formData,
-        area_hectares: formData.area_hectares === '' ? undefined : formData.area_hectares
+        area_hectares: formData.area_hectares === '' ? undefined : formData.area_hectares,
+        ...(uploadMode === 'images' ? { assigned_file_name: imageCollectionName } : (videoFile ? { assigned_file_name: videoFile.name } : {}))
       };
       
       if (initialData?.id) {
@@ -68,9 +77,23 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
         await apiClient.post('/fields', payload);
       }
 
-      if (videoFile && currentUserId) {
+      if (uploadMode === 'images' && imageCollectionName && imageFiles.length > 0 && currentUserId) {
         try {
-          await videoOpsApi.uploadVideo(currentUserId, videoFile);
+          await videoOpsApi.uploadParsedImages(currentUserId, imageCollectionName, imageFiles);
+        } catch (imagesErr: any) {
+          setError(imagesErr.response?.data?.message || imagesErr.message || 'Lahan tersimpan, tetapi gagal mengupload foto');
+          onSuccess();
+          return;
+        }
+      } else if (uploadMode === 'video' && videoFile && currentUserId) {
+        try {
+          let normalizedSrtFile = srtFile;
+          if (normalizedSrtFile) {
+            const dotIndex = videoFile.name.lastIndexOf('.');
+            const baseName = dotIndex !== -1 ? videoFile.name.substring(0, dotIndex) : videoFile.name;
+            normalizedSrtFile = new File([normalizedSrtFile], `${baseName}.srt`, { type: normalizedSrtFile.type });
+          }
+          await videoOpsApi.uploadVideo(currentUserId, videoFile, normalizedSrtFile);
         } catch (videoErr: any) {
           setError(videoErr.response?.data?.message || videoErr.message || 'Lahan tersimpan, tetapi gagal mengupload video');
           onSuccess();
@@ -90,6 +113,16 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
   const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null;
     setVideoFile(file);
+  };
+
+  const handleSrtSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let file = e.target.files?.[0] ?? null;
+    if (file && videoFile) {
+      const dotIndex = videoFile.name.lastIndexOf('.');
+      const baseName = dotIndex !== -1 ? videoFile.name.substring(0, dotIndex) : videoFile.name;
+      file = new File([file], `${baseName}.srt`, { type: file.type });
+    }
+    setSrtFile(file);
   };
 
   return (
@@ -174,31 +207,134 @@ export function CreateFieldModal({ isOpen, initialData, onClose, onSuccess }: Cr
              </select>
           </div>
 
-          {/* Video Upload */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Video Lahan (.mp4)</label>
-            <div className="flex items-center gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => videoInputRef.current?.click()}
-                className="flex items-center gap-2"
-              >
-                <Video className="h-4 w-4" />
-                Upload Video
-              </Button>
-              <span className="text-sm text-muted-foreground truncate max-w-[200px]">
-                {videoFile ? videoFile.name : 'Belum ada file dipilih'}
-              </span>
-            </div>
-            <input
-              ref={videoInputRef}
-              type="file"
-              accept="video/mp4"
-              className="hidden"
-              onChange={handleVideoSelect}
-            />
+          {/* Mode Selector */}
+          <div className="flex border-b border-border pb-1 mb-2">
+            <button
+              type="button"
+              className={`flex-1 pb-1.5 text-xs font-semibold border-b-2 text-center transition-colors ${
+                uploadMode === 'video'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => setUploadMode('video')}
+            >
+              Dari File Video
+            </button>
+            <button
+              type="button"
+              className={`flex-1 pb-1.5 text-xs font-semibold border-b-2 text-center transition-colors ${
+                uploadMode === 'images'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+              onClick={() => setUploadMode('images')}
+            >
+              Dari File Foto
+            </button>
           </div>
+
+          {uploadMode === 'video' ? (
+            <div className="space-y-4">
+              {/* Video Upload */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Video Lahan (.mp4)</label>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => videoInputRef.current?.click()}
+                    className="flex items-center gap-2"
+                  >
+                    <Video className="h-4 w-4" />
+                    Upload Video
+                  </Button>
+                  <span className="text-sm text-muted-foreground truncate max-w-[200px]">
+                    {videoFile ? videoFile.name : 'Belum ada file dipilih'}
+                  </span>
+                </div>
+                <input
+                  ref={videoInputRef}
+                  type="file"
+                  accept="video/mp4"
+                  className="hidden"
+                  onChange={handleVideoSelect}
+                />
+              </div>
+
+              {/* SRT Upload */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">GPS File (.srt) - Opsional</label>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => srtInputRef.current?.click()}
+                    className="flex items-center gap-2"
+                    disabled={!videoFile}
+                    title={!videoFile ? "Pilih video terlebih dahulu" : undefined}
+                  >
+                    <FileText className="h-4 w-4" />
+                    Upload SRT
+                  </Button>
+                  <span className="text-sm text-muted-foreground truncate max-w-[200px]">
+                    {srtFile ? srtFile.name : 'Belum ada file dipilih'}
+                  </span>
+                </div>
+                <input
+                  ref={srtInputRef}
+                  type="file"
+                  accept=".srt"
+                  className="hidden"
+                  onChange={handleSrtSelect}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Nama Koleksi Foto */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nama Koleksi Foto *</label>
+                <input
+                  type="text"
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  placeholder="Masukkan nama koleksi, misal: Lahan_A_29Juni"
+                  value={imageCollectionName}
+                  onChange={(e) => setImageCollectionName(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+
+              {/* Pilih File Foto */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Pilih File Foto *</label>
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => imagesInputRef.current?.click()}
+                    disabled={loading}
+                  >
+                    Pilih Foto
+                  </Button>
+                  <span className="text-sm text-muted-foreground truncate max-w-[200px]">
+                    {imageFiles.length > 0 ? `${imageFiles.length} foto terpilih` : 'Belum ada foto terpilih'}
+                  </span>
+                </div>
+                <input
+                  ref={imagesInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) {
+                      setImageFiles(Array.from(e.target.files));
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end space-x-2 pt-4 border-t mt-6">
             <Button type="button" variant="outline" onClick={onClose} disabled={loading}>

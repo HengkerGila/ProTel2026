@@ -5,7 +5,9 @@ import { validate } from '@/middleware/validate.middleware';
 import { successResponse } from '@/shared/utils/response.util';
 import { db } from '@/db/client';
 import { telemetryRecords, subBlockStates, subBlockCurrentStates } from '@/db/schema/trx';
-import { eq, desc } from 'drizzle-orm';
+import { devices } from '@/db/schema/mst';
+import { AppError } from '@/middleware/error.middleware';
+import { eq, desc, inArray } from 'drizzle-orm';
 
 export const telemetryQueryRouter = Router();
 
@@ -91,13 +93,14 @@ telemetryQueryRouter.get(
   h(async (req, res) => {
     const { subBlockId } = req.params;
 
-    const [state] = await db
+    const [latestRecord] = await db
       .select()
-      .from(subBlockCurrentStates)
-      .where(eq(subBlockCurrentStates.subBlockId, subBlockId))
+      .from(telemetryRecords)
+      .where(eq(telemetryRecords.subBlockId, subBlockId))
+      .orderBy(desc(telemetryRecords.eventTimestamp))
       .limit(1);
 
-    res.json(successResponse(state ?? null));
+    res.json(successResponse(latestRecord ?? null));
   }),
 );
 
@@ -134,4 +137,80 @@ telemetryQueryRouter.post(
 
     res.status(201).json(successResponse(inserted));
   }),
+);
+
+// ---------------------------------------------------------------------------
+// Schema validasi untuk POST /telemetry/records
+// ---------------------------------------------------------------------------
+const InsertTelemetryRecordSchema = z.object({
+  device_code: z.string().min(1),
+  device: z.array(
+    z.object({
+      distance: z.number().optional().nullable(),
+      temperature: z.number().optional().nullable(),
+      pressure: z.number().optional().nullable(),
+    })
+  ),
+});
+
+// ---------------------------------------------------------------------------
+// POST /telemetry/records
+//
+// Memasukkan data pembacaan telemetry baru secara manual/langsung
+// ---------------------------------------------------------------------------
+telemetryQueryRouter.post(
+  '/records',
+  requireAuth,
+  validate(InsertTelemetryRecordSchema),
+  h(async (req, res) => {
+    const body = req.body as z.infer<typeof InsertTelemetryRecordSchema>;
+
+    if (body.device.length === 0) {
+      res.status(201).json(successResponse([]));
+      return;
+    }
+
+    // Generate computed device codes: `${device_code}_${index}`
+    const computedCodes = body.device.map((_, index) => `${body.device_code}_${index}`);
+
+    // Query all matching devices
+    const foundDevices = await db
+      .select({
+        id: devices.id,
+        deviceCode: devices.deviceCode,
+        subBlockId: devices.subBlockId,
+      })
+      .from(devices)
+      .where(inArray(devices.deviceCode, computedCodes));
+
+    const deviceMap = new Map(foundDevices.map((d) => [d.deviceCode, d]));
+
+    // Construct the database records to insert
+    const recordsToInsert = body.device.map((item, index) => {
+      const computedDeviceCode = `${body.device_code}_${index}`;
+      const device = deviceMap.get(computedDeviceCode);
+
+      if (!device) {
+        throw new AppError(404, 'DEVICE_NOT_FOUND', `Device dengan kode ${computedDeviceCode} tidak ditemukan`);
+      }
+
+      return {
+        eventTimestamp:  new Date(),
+        deviceId:        device.id,
+        deviceCode:      device.deviceCode,
+        subBlockId:      device.subBlockId,
+        waterLevelCm:    item.distance !== undefined && item.distance !== null ? item.distance.toString() : undefined,
+        temperatureC:     item.temperature !== undefined && item.temperature !== null ? item.temperature.toString() : undefined,
+        pressure:        item.pressure !== undefined && item.pressure !== null ? item.pressure.toString() : undefined,
+        isValid:         true,
+      };
+    });
+
+    const inserted = await db
+      .insert(telemetryRecords)
+      .values(recordsToInsert)
+      .returning();
+
+    res.status(201).json(successResponse(inserted));
+  })
 );

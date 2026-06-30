@@ -7,6 +7,7 @@ import {
   integer,
   numeric,
   jsonb,
+  json,
 } from 'drizzle-orm/pg-core';
 import { geometryPoint, geometryPolygon } from '../geometry';
 
@@ -66,10 +67,15 @@ export const fields = mst.table('fields', {
   areaHectares:         numeric('area_hectares', { precision: 8, scale: 4 }),
   operatorCountDefault: integer('operator_count_default').notNull().default(1),
   decisionCycleMode:    text('decision_cycle_mode').notNull().default('normal'),
+  isSourceDepleted:     boolean('is_source_depleted').notNull().default(false),
   isActive:             boolean('is_active').notNull().default(true),
   notes:                text('notes'),
   mapVisualUrl:         text('map_visual_url'),
   mapBounds:            jsonb('map_bounds'),
+  mapHeaders:           jsonb('map_headers'),
+  assignedFileName:     text('assigned_file_name'),
+  irrigationEdges:      json('irrigation_edges'),
+  irrigationNodes:      json('irrigation_nodes'),
   createdAt:            timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:            timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -94,11 +100,15 @@ export const subBlocks = mst.table('sub_blocks', {
   fieldId:      uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
   name:         text('name').notNull(),
   code:         text('code'),
+  // unique_code is GENERATED ALWAYS AS (COALESCE(code, 'nocode') || '_' || id) STORED in PostgreSQL.
+  // Drizzle does not model generated columns natively; treat as read-only text.
+  uniqueCode:   text('unique_code'),
   polygonGeom:  geometryPolygon('polygon_geom').notNull(),
   // Generated columns (read-only — PostgreSQL generates these dari polygonGeom)
   areaM2:       numeric('area_m2', { precision: 12, scale: 2 }),
   centroid:     geometryPoint('centroid'),
   elevationM:   numeric('elevation_m', { precision: 7, scale: 2 }),
+  elevationCalibration: numeric('elevation_calibration', { precision: 7, scale: 2 }),
   soilType:     text('soil_type'),
   displayOrder: integer('display_order').notNull().default(0),
   isActive:     boolean('is_active').notNull().default(true),
@@ -108,16 +118,56 @@ export const subBlocks = mst.table('sub_blocks', {
 });
 
 // ---------------------------------------------------------------------------
+// mst.embankments  ← PEMATANG SAWAH (sub-block border / galengan)
+// ---------------------------------------------------------------------------
+export const embankments = mst.table('embankments', {
+  id:           uuid('id').primaryKey().defaultRandom(),
+  fieldId:      uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
+  name:         text('name').notNull(),
+  // code is NOT unique — multiple embankments may share the same code across fields
+  code:         text('code'),
+  // unique_code is GENERATED ALWAYS AS (COALESCE(code, 'nocode') || '_' || id) STORED.
+  // Drizzle does not model generated columns natively; treat as read-only text.
+  uniqueCode:   text('unique_code'),
+  polygonGeom:  geometryPolygon('polygon_geom').notNull(),
+  areaM2:       numeric('area_m2', { precision: 12, scale: 2 }),
+  centroid:     geometryPoint('centroid'),
+  elevationM:   numeric('elevation_m', { precision: 7, scale: 2 }),
+  soilType:     text('soil_type'),
+  displayOrder: integer('display_order').notNull().default(0),
+  isActive:     boolean('is_active').notNull().default(true),
+  notes:        text('notes'),
+  connectedSubBlocks: jsonb('connected_sub_blocks').$type<string[]>().notNull().default([]),
+  createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt:    timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+
+// ---------------------------------------------------------------------------
 // mst.flow_paths
 // ---------------------------------------------------------------------------
 export const flowPaths = mst.table('flow_paths', {
+  id:                   uuid('id').primaryKey().defaultRandom(),
+  fieldId:              uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
+  flowType:             text('flow_type').notNull().default('natural'),
+  floydWarshallMatrix:  json('floyd_warshall_matrix'),
+  isActive:             boolean('is_active').notNull().default(true),
+  notes:                text('notes'),
+  createdAt:            timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// mst.irrigation_points
+// ---------------------------------------------------------------------------
+export const irrigationPoints = mst.table('irrigation_points', {
   id:               uuid('id').primaryKey().defaultRandom(),
-  fromSubBlockId:   uuid('from_sub_block_id').notNull().references(() => subBlocks.id, { onDelete: 'restrict' }),
-  toSubBlockId:     uuid('to_sub_block_id').notNull().references(() => subBlocks.id, { onDelete: 'restrict' }),
-  flowType:         text('flow_type').notNull().default('natural'),
-  isActive:         boolean('is_active').notNull().default(true),
-  notes:            text('notes'),
-  createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  fieldId:          uuid('field_id').notNull().references(() => fields.id, { onDelete: 'restrict' }),
+  pointType:        text('point_type').notNull(),
+  coordinatePoint:  geometryPoint('coordinate_point'),
+  elevationM:       numeric('elevation_m', { precision: 7, scale: 2 }),
+  callibratedElevation: numeric('callibrated_elevation', { precision: 7, scale: 2 }),
+  name:             text('name'),
+  assignedSubBlocks: jsonb('assigned_sub_blocks').$type<string[]>().notNull().default([]),
 });
 
 // ---------------------------------------------------------------------------
@@ -140,6 +190,8 @@ export const devices = mst.table('devices', {
   lastSeenAt:       timestamp('last_seen_at', { withTimezone: true }),
   notes:            text('notes'),
   topic:            text('topic').notNull().default(''),
+  parentStation:    text('parent_station'),
+  coordinate:       json('coordinate'),
   createdAt:        timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt:        timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -173,6 +225,8 @@ export const sensorCalibrations = mst.table('sensor_calibrations', {
   humidityOffsetPct:   numeric('humidity_offset_pct', { precision: 4, scale: 2 }).notNull().default('0.00'),
   calibrationMethod:   text('calibration_method').notNull().default('field_measurement'),
   referenceReadingCm:  numeric('reference_reading_cm', { precision: 7, scale: 2 }),
+  // Jarak maksimum sensor ultrasonik (mm). Rumus: water_level_cm = (sensorMaxDistanceMm - d) / 10
+  sensorMaxDistanceMm: integer('sensor_max_distance_mm').notNull().default(1400),
   calibratedBy:        uuid('calibrated_by').references(() => users.id),
   notes:               text('notes'),
   isActive:            boolean('is_active').notNull().default(true),
@@ -206,7 +260,6 @@ export const irrigationRuleProfiles = mst.table('irrigation_rule_profiles', {
   description:          text('description'),
   bucketCode:           text('bucket_code').notNull().references(() => riceDurationBuckets.bucketCode),
   phaseCode:            text('phase_code').notNull().references(() => growthPhases.phaseCode),
-  awdLowerThresholdCm:  numeric('awd_lower_threshold_cm', { precision: 6, scale: 2 }).notNull(),
   awdUpperTargetCm:     numeric('awd_upper_target_cm', { precision: 6, scale: 2 }).notNull(),
   droughtAlertCm:       numeric('drought_alert_cm', { precision: 6, scale: 2 }),
   minSaturationDays:    integer('min_saturation_days').notNull().default(1),

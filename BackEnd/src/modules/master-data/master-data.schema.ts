@@ -39,10 +39,19 @@ export const CreateFieldSchema = z.object({
   area_hectares:        z.coerce.number().positive().optional(),
   operator_count_default: z.coerce.number().int().min(1).max(50).default(1),
   decision_cycle_mode:  z.enum(['normal', 'siaga']).default('normal'),
+  is_source_depleted:   z.boolean().default(false),
   notes:                z.string().max(2000).optional(),
+  assigned_file_name:   z.string().max(500).optional(),
+  map_headers:          z.any().optional().nullable(),
+  irrigation_edges:     z.array(z.any()).optional().nullable(),
+  irrigation_nodes:     z.array(z.any()).optional().nullable(),
 });
 
 export const UpdateFieldSchema = CreateFieldSchema.partial();
+
+export const DroughtStatusSchema = z.object({
+  is_source_depleted: z.boolean(),
+});
 
 export const AssignUserFieldSchema = z.object({
   user_id:    z.string().uuid('user_id harus berupa UUID'),
@@ -54,13 +63,14 @@ export const AssignUserFieldSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const CreateSubBlockSchema = z.object({
-  name:          z.string().min(1).max(200),
-  code:          z.string().max(20).optional(),
-  polygon_geom:  GeoJsonPolygonSchema,
-  elevation_m:   z.coerce.number().optional(),
-  soil_type:     z.string().max(100).optional(),
-  display_order: z.coerce.number().int().min(0).default(0),
-  notes:         z.string().max(2000).optional(),
+  name:                  z.string().min(1).max(200),
+  code:                  z.string().max(20).optional(),
+  polygon_geom:          GeoJsonPolygonSchema,
+  elevation_m:           z.coerce.number().optional(),
+  elevation_calibration: z.coerce.number().optional(),
+  soil_type:             z.string().max(100).optional(),
+  display_order:         z.coerce.number().int().min(0).default(0),
+  notes:                 z.string().max(2000).optional(),
 });
 
 export const UpdateSubBlockSchema = CreateSubBlockSchema.partial();
@@ -77,12 +87,14 @@ export const ImportSubBlocksSchema = z.object({
 
 export const CreateDeviceSchema = z.object({
   device_code:     z.string().min(1).max(100),
-  device_type:     z.enum(['awd_water_level', 'weather_station', 'multi_sensor']).default('awd_water_level'),
+  device_type:     z.enum(['sensor', 'station', 'awd_water_level', 'weather_station', 'multi_sensor']).default('sensor'),
   connection_type: z.enum(['lorawan', 'nb_iot', 'gsm', 'wifi', 'manual']).default('lorawan'),
   hardware_model:  z.string().max(100).optional(),
   serial_number:   z.string().max(100).optional(),
   firmware_version:z.string().max(50).optional(),
   notes:           z.string().max(2000).optional(),
+  coordinate:      z.record(z.any()).optional().nullable(),
+  parent_station:  z.string().optional().nullable(),
 });
 
 export const UpdateDeviceSchema = CreateDeviceSchema.partial();
@@ -108,11 +120,12 @@ export const CalibrateDeviceSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const CreateFlowPathSchema = z.object({
-  from_sub_block_id: z.string().uuid(),
-  to_sub_block_id:   z.string().uuid(),
-  flow_type:         z.enum(['natural', 'pipe', 'canal', 'pump']).default('natural'),
-  notes:             z.string().max(500).optional(),
+  flow_type:             z.enum(['natural', 'pipe', 'canal', 'pump']).default('natural'),
+  floyd_warshall_matrix: z.unknown().optional(),
+  notes:                 z.string().max(500).optional(),
 });
+
+export const UpdateFlowPathSchema = CreateFlowPathSchema.partial();
 
 // ---------------------------------------------------------------------------
 // Crop cycle schemas
@@ -146,7 +159,6 @@ export const CreateRuleProfileSchema = z.object({
   description:             z.string().max(1000).optional(),
   bucket_code:             z.string().min(1),
   phase_code:              z.string().min(1),
-  awd_lower_threshold_cm:  z.coerce.number(),
   awd_upper_target_cm:     z.coerce.number(),
   drought_alert_cm:        z.coerce.number().optional(),
   min_saturation_days:     z.coerce.number().int().min(0).default(1),
@@ -158,3 +170,48 @@ export const CreateRuleProfileSchema = z.object({
 });
 
 export const UpdateRuleProfileSchema = CreateRuleProfileSchema.partial();
+
+// ---------------------------------------------------------------------------
+// Irrigation Point schemas
+// ---------------------------------------------------------------------------
+
+export const GeoJsonPointSchema = z.object({
+  type:        z.literal('Point'),
+  coordinates: z.tuple([z.number(), z.number()]),
+});
+
+export type GeoJsonPoint = z.infer<typeof GeoJsonPointSchema>;
+
+export const CreateIrrigationPointSchema = z.object({
+  point_type:       z.string().min(1).max(100),
+  coordinate_point: GeoJsonPointSchema.optional(),
+  elevation_m:      z.coerce.number().optional(),
+  callibrated_elevation: z.coerce.number().optional(),
+  name:             z.string().max(200).optional(),
+  assigned_sub_blocks: z.array(z.string().uuid()).default([]),
+});
+
+export const UpdateIrrigationPointSchema = CreateIrrigationPointSchema.partial();
+
+// ---------------------------------------------------------------------------
+// Embankment schemas
+// ---------------------------------------------------------------------------
+
+export const CreateEmbankmentSchema = z.object({
+  name:                 z.string().min(1).max(200),
+  code:                 z.string().max(20).optional(),
+  polygon_geom:         GeoJsonPolygonSchema,
+  elevation_m:          z.coerce.number().optional(),
+  soil_type:            z.string().max(100).optional(),
+  display_order:        z.coerce.number().int().min(0).default(0),
+  notes:                z.string().max(2000).optional(),
+  connected_sub_blocks: z.array(z.string().uuid()).default([]),
+});
+
+export const UpdateEmbankmentSchema = CreateEmbankmentSchema.partial();
+
+export const ImportEmbankmentSchema = z.object({
+  geojson:     GeoJsonFeatureCollectionSchema,
+  name_field:  z.string().default('name'),
+  code_field:  z.string().optional(),
+});

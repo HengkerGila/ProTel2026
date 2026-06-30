@@ -15,15 +15,17 @@ import ImageLayer from 'ol/layer/Image';
 import ImageStatic from 'ol/source/ImageStatic';
 import { transformExtent } from 'ol/proj';
 import { apiClient } from '@/api/client';
+import { getCachedMapImageUrl } from '@/lib/mapCache';
 
 interface EntityDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
   data: any;
+  excludeKeys?: string[];
 }
 
-export function EntityDetailModal({ isOpen, onClose, title, data }: EntityDetailModalProps) {
+export function EntityDetailModal({ isOpen, onClose, title, data, excludeKeys = [] }: EntityDetailModalProps) {
   const miniMapRef = useRef<HTMLDivElement>(null);
   const [fieldData, setFieldData] = useState<any>(null);
 
@@ -38,80 +40,95 @@ export function EntityDetailModal({ isOpen, onClose, title, data }: EntityDetail
   useEffect(() => {
     if (!isOpen || !data?.polygonGeom || !miniMapRef.current) return;
 
+    let active = true;
     let olMap: Map | null = null;
-    try {
-      const geom = typeof data.polygonGeom === 'string'
-        ? JSON.parse(data.polygonGeom)
-        : data.polygonGeom;
+    const mapElement = miniMapRef.current;
 
-      const geojsonFormat = new GeoJSON();
-      const feature = geojsonFormat.readFeatures(
-        {
-          type: 'Feature',
-          geometry: geom,
-          properties: {},
-        },
-        {
-          dataProjection: 'EPSG:4326',
-          featureProjection: 'EPSG:3857',
-        }
-      );
-
-      const vectorSource = new VectorSource({
-        features: Array.isArray(feature) ? feature : [feature],
-      });
-
-      const layers: any[] = [];
+    const initMap = async () => {
+      let imageUrl: string | null = null;
       if (fieldData?.mapVisualUrl) {
-        const bounds = fieldData.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
-        const extent = transformExtent(
-          [bounds[0][1], bounds[1][0], bounds[1][1], bounds[0][0]],
-          'EPSG:4326',
-          'EPSG:3857'
+        imageUrl = await getCachedMapImageUrl(fieldData.mapVisualUrl, fieldData.name);
+      }
+
+      if (!active) return;
+
+      try {
+        const geom = typeof data.polygonGeom === 'string'
+          ? JSON.parse(data.polygonGeom)
+          : data.polygonGeom;
+
+        const geojsonFormat = new GeoJSON();
+        const feature = geojsonFormat.readFeatures(
+          {
+            type: 'Feature',
+            geometry: geom,
+            properties: {},
+          },
+          {
+            dataProjection: 'EPSG:4326',
+            featureProjection: 'EPSG:3857',
+          }
         );
-        layers.push(new ImageLayer({
-          source: new ImageStatic({
-            url: fieldData.mapVisualUrl,
-            imageExtent: extent
-          })
-        }));
-      } else {
-        layers.push(new TileLayer({
-          source: new OSM(),
-        }));
-      }
 
-      layers.push(new VectorLayer({
-        source: vectorSource,
-        style: new Style({
-          stroke: new Stroke({
-            color: '#16a34a',
-            width: 3,
+        const vectorSource = new VectorSource({
+          features: Array.isArray(feature) ? feature : [feature],
+        });
+
+        const layers: any[] = [];
+        if (imageUrl) {
+          const bounds = fieldData.mapBounds || [[ -6.2100, 106.8100], [-6.2110, 106.8110]];
+          const extent = transformExtent(
+            [bounds[0][1], bounds[1][0], bounds[1][1], bounds[0][0]],
+            'EPSG:4326',
+            'EPSG:3857'
+          );
+          layers.push(new ImageLayer({
+            source: new ImageStatic({
+              url: imageUrl,
+              imageExtent: extent
+            })
+          }));
+        } else {
+          layers.push(new TileLayer({
+            source: new OSM(),
+          }));
+        }
+
+        layers.push(new VectorLayer({
+          source: vectorSource,
+          style: new Style({
+            stroke: new Stroke({
+              color: '#16a34a',
+              width: 3,
+            }),
+            fill: new Fill({
+              color: 'rgba(34, 197, 94, 0.4)',
+            }),
           }),
-          fill: new Fill({
-            color: 'rgba(34, 197, 94, 0.4)',
+        }));
+
+        olMap = new Map({
+          target: mapElement,
+          layers: layers,
+          view: new View({
+            center: [0, 0],
+            zoom: 16,
           }),
-        }),
-      }));
+        });
 
-      olMap = new Map({
-        target: miniMapRef.current,
-        layers: layers,
-        view: new View({
-          center: [0, 0],
-          zoom: 16,
-        }),
-      });
-
-      const extent = vectorSource.getExtent();
-      if (extent && extent[0] !== Infinity) {
-        olMap.getView().fit(extent, { padding: [20, 20, 20, 20] });
+        const extent = vectorSource.getExtent();
+        if (extent && extent[0] !== Infinity) {
+          olMap.getView().fit(extent, { padding: [20, 20, 20, 20] });
+        }
+      } catch (e) {
+        console.error("Failed to render mini map in EntityDetailModal", e);
       }
-    } catch (e) {
-      console.error("Failed to render mini map in EntityDetailModal", e);
-    }
+    };
+
+    initMap();
 
     return () => {
+      active = false;
       if (olMap) olMap.setTarget(undefined);
     };
   }, [isOpen, data, fieldData]);
@@ -130,14 +147,30 @@ export function EntityDetailModal({ isOpen, onClose, title, data }: EntityDetail
 
         <div className="p-6 overflow-y-auto flex-1">
           <div className="grid grid-cols-2 gap-4">
-            {Object.entries(data).map(([key, value]) => (
-              <div key={key} className="border-b pb-2">
-                <p className="text-[10px] uppercase font-bold text-muted-foreground">{key.replace(/([A-Z])/g, ' $1')}</p>
-                <p className="text-sm font-medium">
-                  {typeof value === 'object' ? (value ? 'Object/Array' : 'null') : String(value)}
-                </p>
-              </div>
-            ))}
+            {Object.entries(data)
+              .filter(([key]) => key !== 'polygonGeom' && key !== 'centroid' && !excludeKeys.includes(key))
+              .map(([key, value]) => (
+                <div key={key} className="border-b pb-2">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground">{key.replace(/([A-Z])/g, ' $1')}</p>
+                  <div className="text-sm font-medium">
+                    {Array.isArray(value) ? (
+                      value.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {value.map((item: any, i) => (
+                            <span key={i} className="inline-block bg-muted px-2 py-0.5 rounded text-xs font-mono">
+                              {typeof item === 'object' && item !== null ? (item.deviceCode || JSON.stringify(item)) : String(item)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : '-'
+                    ) : typeof value === 'object' ? (
+                      value ? 'Object/Array' : 'null'
+                    ) : (
+                      String(value ?? '-')
+                    )}
+                  </div>
+                </div>
+              ))}
           </div>
 
           {data.polygonGeom && (

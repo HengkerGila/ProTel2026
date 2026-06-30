@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { apiClient } from '@/api/client';
 import { CreateDeviceModal } from './create-device-modal';
 import { EntityDetailModal } from '@/components/entity-detail-modal';
+import { useDialog } from '@/components/ui/dialog-provider';
 
 interface Field {
   id: string;
@@ -23,9 +24,12 @@ interface Device {
   status: string;
   firmwareVersion: string;
   topic: string;
+  subBlockId?: string | null;
+  subBlockName?: string | null;
 }
 
 export function DevicesPage() {
+  const dialog = useDialog();
   const [fields, setFields] = useState<Field[]>([]);
   const [selectedFieldId, setSelectedFieldId] = useState<string>('');
   
@@ -73,12 +77,13 @@ export function DevicesPage() {
   }, [selectedFieldId]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus perangkat ini dari database?')) return;
+    const confirmed = await dialog.confirm('Apakah Anda yakin ingin menghapus perangkat ini dari database?');
+    if (!confirmed) return;
     try {
       await apiClient.delete(`/devices/${id}`);
       if (selectedFieldId) fetchDevices(selectedFieldId);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Gagal menghapus perangkat');
+      await dialog.alert(err.response?.data?.message || 'Gagal menghapus perangkat');
     }
   };
 
@@ -179,8 +184,8 @@ export function DevicesPage() {
                     <th className="px-6 py-3 font-medium">Tipe Node</th>
                     <th className="px-6 py-3 font-medium">Koneksi</th>
                     <th className="px-6 py-3 font-medium">Hardware Model</th>
+                    <th className="px-6 py-3 font-medium">Petak Terpasang</th>
                     <th className="px-6 py-3 font-medium">Firmware</th>
-                    <th className="px-6 py-3 font-medium">Topic</th>
                     <th className="px-6 py-3 font-medium text-center">Status</th>
                     <th className="px-6 py-3 font-medium text-right">Aksi</th>
                   </tr>
@@ -201,8 +206,16 @@ export function DevicesPage() {
                         </div>
                       </td>
                       <td className="px-6 py-4">{dev.hardwareModel || '-'}</td>
+                      <td className="px-6 py-4">
+                        {dev.subBlockName ? (
+                          <Badge variant="outline" className="text-xs bg-green-500/10 text-green-600 border-green-500/20">
+                            {dev.subBlockName}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground text-xs italic">Belum terpasang</span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 code font-mono text-xs">v{dev.firmwareVersion}</td>
-                      <td className="px-6 py-4 font-mono text-xs text-muted-foreground">{dev.topic || '-'}</td>
                       <td className="px-6 py-4 text-center">
                         <Badge variant={dev.status === 'active' ? "default" : "destructive"}>
                           {dev.status}
